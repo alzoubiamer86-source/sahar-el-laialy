@@ -82,7 +82,7 @@ const Voice = (() => {
     try {
       const offer = await pc.createOffer({ offerToReceiveAudio: false });
       await pc.setLocalDescription(offer);
-      socket.emit('webrtc_offer', { to: listenerSocketId, offer: pc.localDescription });
+      socket.emit('webrtc_offer', { to: listenerSocketId, offer: pc.localDescription, kind: 'voice' });
     } catch (err) { console.error('offer:', err); }
   }
 
@@ -107,7 +107,7 @@ const Voice = (() => {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socket.emit('webrtc_answer', { to: fromSocketId, answer: pc.localDescription });
+      socket.emit('webrtc_answer', { to: fromSocketId, answer: pc.localDescription, kind: 'voice' });
       console.log('✅ Answer sent');
     } catch (err) { console.error('answer:', err); }
   }
@@ -133,7 +133,7 @@ const Voice = (() => {
     peers.set(remoteSocketId, pc);
 
     pc.onicecandidate = e => {
-      if (e.candidate) socket.emit('webrtc_ice', { to: remoteSocketId, candidate: e.candidate });
+      if (e.candidate) socket.emit('webrtc_ice', { to: remoteSocketId, candidate: e.candidate, kind: 'voice' });
     };
 
     pc.oniceconnectionstatechange = () => {

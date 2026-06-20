@@ -74,6 +74,8 @@ const PALETTE = ['#000000','#800000','#008000','#000080','#800080','#008080','#c
 const ROLES = {admin:4,moderator:3,vip:2,user:1,guest:0};
 const ROLE_LBL = {admin:'👑 مدير',moderator:'🛡️ مشرف',vip:'💎 VIP',user:'عضو',guest:'👤 زائر'};
 const ROLE_COLORS = {admin:'#cc0000',moderator:'#8b4513',vip:'#7700cc',user:'#000080',guest:'#555577'};
+const CAMERA_PEERS = new Map();
+
 const PERMS_LIST = [
   {key:'blockMachine',label:'حظر الأجهزة'},
   {key:'muteUsers',label:'كتم المستخدمين'},
@@ -322,9 +324,9 @@ function connectSocket(){
   s.on('speaker_joined',({speakerSocketId,nickname,avatar})=>Voice.onSpeakerJoined(s,speakerSocketId,nickname,avatar));
   s.on('speaker_left',  ({speakerSocketId})=>Voice.onSpeakerLeft(speakerSocketId));
   s.on('new_listener',  ({listenerSocketId})=>Voice.onNewListener(s,listenerSocketId));
-  s.on('webrtc_offer',  ({from,offer})=>Voice.onOffer(s,from,offer));
-  s.on('webrtc_answer', ({from,answer})=>Voice.onAnswer(from,answer));
-  s.on('webrtc_ice',    ({from,candidate})=>Voice.onIce(from,candidate));
+  s.on('webrtc_offer',  ({from,offer,kind='voice'})=>kind==='cam'?onCamOffer(s,from,offer):Voice.onOffer(s,from,offer));
+  s.on('webrtc_answer', ({from,answer,kind='voice'})=>kind==='cam'?onCamAnswer(from,answer):Voice.onAnswer(from,answer));
+  s.on('webrtc_ice',    ({from,candidate,kind='voice'})=>kind==='cam'?onCamIce(from,candidate):Voice.onIce(from,candidate));
 
   // Cam
   s.on('cam_available',({socketId,nickname,avatar})=>{
@@ -337,8 +339,12 @@ function connectSocket(){
     addNotifCount();
   });
   s.on('cam_rejected_notification',({by})=>toast(by+' رفض طلب الكاميرا','info'));
+  s.on('cam_approved_notification',({by})=>toast(by+' ÙˆØ§ÙÙ‚ Ø¹Ù„Ù‰ Ù…Ø´Ø§Ù‡Ø¯Ø© Ø§Ù„ÙƒØ§Ù…ÙŠØ±Ø§','success'));
+  s.on('cam_viewer_approved',({viewerSocketId})=>startCamWebRTCTo(viewerSocketId));
   s.on('force_cam_off',()=>{
     if(state.localStream){state.localStream.getTracks().forEach(t=>t.stop());state.localStream=null;}
+    CAMERA_PEERS.forEach(pc=>{try{pc.close();}catch{}});
+    CAMERA_PEERS.clear();
     state.camActive=false;$('camBtn').classList.remove('active');
     $('camStrip').innerHTML='';$('camStrip').style.display='none';
     toast('📷 تم إيقاف كاميرتك بواسطة المشرف','error');
@@ -515,6 +521,7 @@ function addCamThumb(socketId,nickname,avatar,showReqBtn=false){
   }
 }
 function removeCamThumb(socketId){
+  closeCamPeer(socketId);
   const th=$('camStrip').querySelector(`[data-csock="${socketId}"]`);
   if(th)th.remove();
   if(!$('camStrip').children.length)$('camStrip').style.display='none';
@@ -539,12 +546,50 @@ function addSpyCamThumb(socketId,nickname,avatar){
 
 async function startCamWebRTCTo(toSocketId){
   if(!state.localStream)return;
+  closeCamPeer(toSocketId);
   const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  CAMERA_PEERS.set(toSocketId,pc);
   state.localStream.getTracks().forEach(t=>pc.addTrack(t,state.localStream));
-  pc.onicecandidate=e=>{if(e.candidate)state.socket?.emit('webrtc_ice',{to:toSocketId,candidate:e.candidate});};
+  pc.onicecandidate=e=>{if(e.candidate)state.socket?.emit('webrtc_ice',{to:toSocketId,candidate:e.candidate,kind:'cam'});};
   const offer=await pc.createOffer();
   await pc.setLocalDescription(offer);
-  state.socket?.emit('webrtc_offer',{to:toSocketId,offer});
+  state.socket?.emit('webrtc_offer',{to:toSocketId,offer,kind:'cam'});
+}
+
+async function onCamOffer(socket,fromSocketId,offer){
+  closeCamPeer(fromSocketId);
+  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  CAMERA_PEERS.set(fromSocketId,pc);
+  pc.onicecandidate=e=>{if(e.candidate)socket?.emit('webrtc_ice',{to:fromSocketId,candidate:e.candidate,kind:'cam'});};
+  pc.ontrack=e=>{
+    const stream=e.streams?.[0]||new MediaStream([e.track]);
+    showRemoteCam(fromSocketId,stream);
+  };
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer=await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  socket?.emit('webrtc_answer',{to:fromSocketId,answer:pc.localDescription,kind:'cam'});
+}
+async function onCamAnswer(fromSocketId,answer){
+  const pc=CAMERA_PEERS.get(fromSocketId);
+  if(!pc||pc.signalingState==='stable')return;
+  try{await pc.setRemoteDescription(new RTCSessionDescription(answer));}catch(e){console.warn('cam answer',e);}
+}
+async function onCamIce(fromSocketId,candidate){
+  const pc=CAMERA_PEERS.get(fromSocketId);
+  if(!pc||!candidate)return;
+  try{await pc.addIceCandidate(new RTCIceCandidate(candidate));}catch{}
+}
+function closeCamPeer(socketId){
+  const pc=CAMERA_PEERS.get(socketId);
+  if(pc){try{pc.close();}catch{}CAMERA_PEERS.delete(socketId);}
+}
+function showRemoteCam(socketId,stream){
+  const spyVideo=document.querySelector(`[data-spysock="${socketId}"] video`);
+  if(spyVideo){spyVideo.srcObject=stream;spyVideo.play?.().catch(()=>{});return;}
+  $('camVideo').srcObject=stream;
+  $('camModalTitle').textContent='📷 '+(state.onlineUsers.find(u=>u.socketId===socketId)?.nickname||'Camera');
+  $('camModal').style.display='flex';
 }
 
 // ── Context Menu ───────────────────────────────
@@ -757,6 +802,8 @@ async function toggleCam(){
   if(state.roomSettings.whoCan==='mods'&&!['admin','moderator'].includes(role)){toast('المشرفون فقط يمكنهم فتح الكاميرا','error');return;}
   if(state.camActive){
     state.localStream?.getTracks().forEach(t=>t.stop());state.localStream=null;state.camActive=false;
+    CAMERA_PEERS.forEach(pc=>{try{pc.close();}catch{}});
+    CAMERA_PEERS.clear();
     $('camBtn').classList.remove('active');state.socket?.emit('cam_off');
     $('camStrip').innerHTML='';$('camStrip').style.display='none';toast('📷 تم إيقاف الكاميرا','info');
   } else {
