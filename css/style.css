@@ -483,3 +483,134 @@ html,body{height:100%;font-family:var(--font);background:var(--bg-app);color:var
   }
   .panel-backdrop.show { display: block; }
 }
+
+/* ── Fix #13 — A B labels (already in HTML, just style) ── */
+#boldBtn { font-weight: 700; font-family: serif; font-size: 14px; }
+#italicBtn { font-style: italic; font-family: serif; font-size: 14px; }
+
+/* ── Fix #5 — mute button active state ── */
+#muteBtn.active {
+  background: linear-gradient(to bottom, #cc0000, #990000) !important;
+  border-color: #770000 !important;
+  box-shadow: inset 1px 1px 4px rgba(0,0,0,.5), 0 0 8px rgba(200,0,0,.4) !important;
+}
+
+/* ── Fix #14 — large animated emojis ── */
+.emoji-big {
+  font-size: 32px !important;
+  display: inline-block;
+  animation: emojiPop .35s cubic-bezier(.36,.07,.19,.97) both;
+  line-height: 1.1;
+}
+@keyframes emojiPop {
+  0%   { transform: scale(0) rotate(-10deg); }
+  60%  { transform: scale(1.3) rotate(5deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+/* ── Fix #6 — cam viewer list larger & visible ── */
+.cam-viewers-list {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  background: rgba(0,0,0,.75);
+  max-height: 80px;
+  overflow-y: auto;
+  padding: 2px 4px;
+}
+.cam-viewer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: #fff;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.cam-kick-viewer {
+  background: #cc0000;
+  border: none;
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* Larger cam thumb for easier viewer management */
+.cam-thumb {
+  width: 110px;
+  height: 85px;
+}
+
+/* ── Fix #12 — disabled permissions greyed out ── */
+.perm-disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.perm-disabled input { cursor: not-allowed; }
+
+/* ── Fix #9 — role dropdown option colors ── */
+select option[value="owner"]      { color: #8b0000; font-weight: 700; }
+select option[value="master"]     { color: #8b4513; font-weight: 700; }
+select option[value="super_admin"]{ color: #6a0dad; font-weight: 700; }
+select option[value="moderator"]  { color: #00008b; font-weight: 700; }
+select option[value="user"]       { color: #1a5a1a; font-weight: 700; }
+
+/* ── Stage kick button ── */
+.stage-kick-btn {
+  background: #cc0000;
+  border: none;
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+/* ── Mobile panel fixes ── */
+@media (max-width: 768px) {
+  .screen { height: 100dvh; }
+  .chat-layout { height: calc(100dvh - 32px - 48px); }
+  .messages-area { flex: 1; overflow-y: auto; min-height: 0; }
+  .input-area { flex-shrink: 0; position: sticky; bottom: 0; z-index: 10; }
+  .fmt-bar { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  #msgInput { font-size: 16px; min-height: 36px; }
+  .send-btn { padding: 8px 14px; font-size: 12px; }
+  .users-panel {
+    display: flex !important;
+    position: fixed;
+    top: 80px; left: 0; bottom: 0;
+    width: 220px; z-index: 60;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 3px 0 16px rgba(0,0,0,.3);
+  }
+  .users-panel.open { transform: translateX(0); }
+  .rooms-panel {
+    position: fixed;
+    top: 80px; right: 0; bottom: 0;
+    width: 200px; min-width: 200px; z-index: 60;
+    transform: translateX(100%);
+    transition: transform .25s ease;
+    box-shadow: -3px 0 16px rgba(0,0,0,.3);
+  }
+  .rooms-panel.open { transform: translateX(0); }
+  .panel-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.4); z-index: 55;
+  }
+  .panel-backdrop.show { display: block; }
+  .toolbar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tb-btn { min-width: 44px; flex-shrink: 0; }
+  .rm-window { width: 100vw; height: 100vh; border-radius: 0; max-width: 100vw; max-height: 100vh; }
+  .spy-window { width: 100vw; height: 100vh; border-radius: 0; }
+  .pm-panel { width: 100vw; left: 0; }
+}
+@media (max-width: 400px) {
+  .tb-btn { min-width: 36px; padding: 2px 4px; font-size: 7px; height: 36px; }
+}
+.rooms-toggle-btn { display: none; padding: 4px 10px; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); border-radius: 4px; color: #fff; font-size: 13px; cursor: pointer; font-family: var(--font); }
+@media(max-width:900px) { .rooms-toggle-btn { display: flex; align-items: center; } }
