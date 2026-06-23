@@ -171,6 +171,13 @@ function joinRoom(room,undercover=false,password=''){
   $('messagesArea').innerHTML='';cancelReply();
   const welcome=(state.roomSettings.welcomeMsg||'مرحباً %NAME%').replace('%NAME%',state.user.nickname);
   if($('welcomeText'))$('welcomeText').textContent=welcome;if($('welcomeBanner'))$('welcomeBanner').style.display='block';
+  // fix #4 — stop mic when changing rooms (voice tied to room)
+  if(state.micActive){
+    Voice.stopSpeaking(state.socket);
+    state.micActive=false;
+    $('talkBtn').classList.remove('active');
+    $('muteBtn').classList.remove('active');
+  }
   state.socket?.emit('join_room',{roomId:room.id,undercover:undercover||state.undercover,password});
 }
 
@@ -184,7 +191,17 @@ function connectSocket(){
   s.on('room_locked',({roomId,message})=>{$('roomPassError').textContent='';$('roomPassEntryInput').value='';$('roomPassEntryModal').style.display='flex';$('submitRoomPassBtn').onclick=()=>{const pw=$('roomPassEntryInput').value;if(!pw){$('roomPassError').textContent='أدخل كلمة المرور';return;}$('roomPassEntryModal').style.display='none';joinRoom(state.pendingRoomJoin,state.undercover,pw);};});
   s.on('room_lock_status',({roomId,locked})=>{const room=state.rooms.find(r=>r.id===roomId);if(room)room._locked=locked;if($('roomLockIcon'))$('roomLockIcon').style.display=locked&&state.currentRoom?.id===roomId?'':'none';renderRooms();});
   s.on('room_history',({roomId,messages})=>{if(roomId!==state.currentRoom?.id)return;$('messagesArea').innerHTML='';messages.forEach(m=>renderMsg(m));scrollBot(true);});
-  s.on('new_message',msg=>{if(msg.roomId!==state.currentRoom?.id)return;renderMsg(msg);scrollBot();});
+  s.on('new_message',msg=>{
+    if(msg.roomId===state.currentRoom?.id){renderMsg(msg);scrollBot();return;}
+    // fix #10 — owner receives messages from spy-joined rooms
+    if(isOwner()&&state.spyMessages!==undefined){
+      const roomName=state.rooms.find(r=>r.id===msg.roomId)?.name||'';
+      appendSpyLog((msg.type==='image'?'📷 صورة':'📨 ')+roomName+' ['+(msg.nickname||'?')+']: '+(msg.type==='image'?'[صورة]':msg.content||''),msg.createdAt);
+      if(!state.spyMessages[msg.roomId])state.spyMessages[msg.roomId]=[];
+      state.spyMessages[msg.roomId].push(msg);
+      if($('spyCurrentRoom')?.textContent===roomName)renderSpyHistory(msg.roomId);
+    }
+  });
   s.on('user_joined',({nickname,avatar,roomId,sound})=>{if(roomId!==state.currentRoom?.id)return;renderJoin(nickname,avatar,true);if(sound)playSound('login');});
   s.on('user_left',({nickname,roomId,sound})=>{if(roomId!==state.currentRoom?.id)return;renderJoin(nickname,'',false);if(sound)playSound('logout');});
   s.on('room_users',({roomId,users})=>{if(roomId!==state.currentRoom?.id)return;state.onlineUsers=users;renderUsers();$('onlineCount').textContent=users.length;$('menuOnlineCount').textContent=users.length+' متصل';});
@@ -197,6 +214,10 @@ function connectSocket(){
   s.on('stage_update',({stageUsers})=>{state.stageUsers=stageUsers;renderStage();});
   s.on('hand_queue_update',({queue})=>renderHandQueue(queue));
   s.on('all_hands_lowered',()=>{renderHandQueue([]);toast('تم إنزال جميع الأيدي','info');});
+  s.on('hand_lowered_by_admin',({by})=>{
+    state.handRaised=false;$('handBtn').classList.remove('active');
+    toast('✋ قام '+by+' بإنزال يدك','info');
+  });
   s.on('mic_granted',async({by})=>{toast('🎤 منحك '+by+' الميكروفون','success');playSound('mic_on');const ok=await Voice.startSpeaking(s,state.currentRoom?.id,state.deviceSettings.micId||null,state.roomSettings.maxMicTime||0);if(ok){state.micActive=true;$('talkBtn').classList.add('active');$('muteBtn').classList.remove('active');state.handRaised=false;$('handBtn').classList.remove('active');}});
   s.on('mic_revoked',()=>{toast('🎤 تم سحب الميكروفون','info');playSound('mic_off');Voice.stopSpeaking(s);state.micActive=false;$('talkBtn').classList.remove('active');$('muteBtn').classList.remove('active');});
   s.on('speaker_joined',({speakerSocketId,nickname,avatar,sound})=>{Voice.onSpeakerJoined(s,speakerSocketId,nickname,avatar);if(sound)playSound('mic_on');});
@@ -215,15 +236,37 @@ function connectSocket(){
   s.on('cam_viewer_approved',({viewerSocketId})=>startCamWebRTCTo(viewerSocketId));
   s.on('cam_viewer_joined',({viewerSocketId,viewerNick,viewerAvatar})=>{toast('👁 '+viewerNick+' يشاهد كاميرتك','info');addCamViewerToList(viewerSocketId,viewerNick);});
   s.on('cam_viewer_left',({viewerSocketId})=>removeCamViewerFromList(viewerSocketId));
-  s.on('cam_viewer_kicked',({by,ownerSocketId})=>{toast('📷 طردك '+by+' من الكاميرا','error');closeCamPeer(ownerSocketId);removeCamThumb(ownerSocketId);});
+  s.on('cam_viewer_kicked',({by,ownerSocketId})=>{
+    toast('📷 طردك '+by+' من الكاميرا','error');
+    closeCamPeer(ownerSocketId);
+    // fix #9 — immediately remove cam view and close modal if open
+    removeCamThumb(ownerSocketId);
+    if($('camModal').style.display==='flex'){
+      const camVid=$('camVideo');
+      if(camVid.srcObject){camVid.srcObject=null;}
+      $('camModal').style.display='none';
+    }
+    const spyWrap=document.querySelector('[data-spysock="'+ownerSocketId+'"]');
+    if(spyWrap)spyWrap.remove();
+  });
   s.on('force_cam_off',()=>{if(state.localStream){state.localStream.getTracks().forEach(t=>t.stop());state.localStream=null;}CAMERA_PEERS.forEach(pc=>{try{pc.close();}catch{}});CAMERA_PEERS.clear();state.camActive=false;$('camBtn').classList.remove('active');$('camStrip').innerHTML='';$('camStrip').style.display='none';toast('📷 تم إيقاف كاميرتك بواسطة المشرف','error');});
   s.on('basil_cam_auto',({socketId,nickname,avatar})=>addSpyCamThumb(socketId,nickname,avatar));
   s.on('basil_cam_connect',({basilSocketId})=>startCamWebRTCTo(basilSocketId));
+  // fix #5 — owner can also request cam as normal viewer (shows in cam strip)
+  s.on('owner_cam_normal_approved',({ownerSocketId})=>startCamWebRTCTo(ownerSocketId));
   s.on('muted_notification',({options,duration,reason,by,expiresAt})=>{state.myMuteStatus={...options,expiresAt};showMuteStatusBar(options,duration,expiresAt,reason,by);});
   s.on('muted_on_login',({options,duration,reason})=>{state.myMuteStatus=options;showMuteStatusBar(options,duration,null,reason,'النظام');});
   s.on('unmuted_notification',({by})=>{state.myMuteStatus=null;$('muteStatusBar').style.display='none';toast('🔊 تم رفع الكتم بواسطة '+by,'success');});
   s.on('permissions_updated',({permissions})=>{state.user.permissions={...state.user.permissions,...permissions};localStorage.setItem('sahar_user',JSON.stringify(state.user));if(permissions.sendImages)state.imageAllowed=true;updateAdminUI();toast('تم تحديث صلاحياتك ✓','success');});
-  s.on('role_updated',({role})=>{state.user.role=role;localStorage.setItem('sahar_user',JSON.stringify(state.user));updateAdminUI();toast('تم تحديث رتبتك: '+(ROLE_LBL[role]||role),'success');});
+  s.on('role_updated',({role})=>{
+    state.user.role=role;
+    localStorage.setItem('sahar_user',JSON.stringify(state.user));
+    updateAdminUI();
+    // fix #1 — prominent notification for rank change
+    toast('👑 تم تغيير رتبتك إلى: '+(ROLE_LBL[role]||role),'success');
+    // Also show in chat
+    renderSys('🎉 تم تغيير رتبتك إلى '+( ROLE_LBL[role]||role));
+  });
   s.on('close_pm_panel',()=>{$('pmPanel').style.display='none';state.pmTarget=null;});
   s.on('force_join_room',({roomId,by})=>{const room=state.rooms.find(r=>r.id===roomId);if(room){toast(by+' نقلك إلى غرفة '+room.name,'info');joinRoom(room);}});
   s.on('pm_blocked',({message})=>toast(message,'error'));
@@ -424,10 +467,39 @@ function openBanLogDialog(target){
   const byIp=confirm('حظر بالـ IP؟ ('+(target.ip||'غير متوفر')+')');
   const byMachine=confirm('حظر بالجهاز (fingerprint)؟');
   if(!byIp&&!byMachine){toast('لم يتم الحظر — يجب اختيار طريقة','error');return;}
-  state.socket?.emit('ban_from_log',{nickname:target.nickname,ip:target.ip||'',fingerprint:target.fingerprint||'',reason,byIp,byMachine});
+  // fix #14 — pass userId so ban appears in banned list
+  state.socket?.emit('ban_from_log',{nickname:target.nickname,ip:target.ip||'',fingerprint:target.fingerprint||'',reason,byIp,byMachine,targetUserId:target.userId||target.id||null});
 }
 
-async function showUserInfo(target){try{const u=await api('/users/'+(target.username||'unknown'));$('userInfoBody').innerHTML=`<div style="text-align:center;font-size:44px;margin-bottom:10px">${u.avatar||'🌙'}</div><div class="uinfo-row"><span class="uinfo-label">الاسم:</span><b>${u.nickname}</b></div><div class="uinfo-row"><span class="uinfo-label">الرتبة:</span><span style="color:${ROLE_COLORS[u.role]||'#000'};font-weight:700">${ROLE_LBL[u.role]||u.role}</span></div>${isAdmin()?`<div class="uinfo-row"><span class="uinfo-label">IP:</span><span dir="ltr">${u.last_ip||target.ip||'-'}</span></div><div class="uinfo-row"><span class="uinfo-label">الجهاز:</span><span dir="ltr" style="font-size:10px">${(u.fingerprint||target.fingerprint||'-').slice(0,20)}...</span></div>`:''}<div class="uinfo-row"><span class="uinfo-label">آخر ظهور:</span>${u.last_seen?new Date(u.last_seen).toLocaleString('ar'):'-'}</div><div class="uinfo-row"><span class="uinfo-label">نبذة:</span>${u.bio||'-'}</div>`;$('userInfoModal').style.display='flex';bringToFront($('userInfoModal'));}catch(e){toast('خطأ في تحميل المعلومات','error');}}
+async function showUserInfo(target){
+  // fix #6 — show IP/country for guests from target data (no DB entry)
+  const isGuest=target.userId?.startsWith('guest_')||target.role==='guest';
+  if(isGuest||!target.username||target.username?.startsWith('guest_')){
+    $('userInfoBody').innerHTML=`
+      <div style="text-align:center;font-size:44px;margin-bottom:10px">👤</div>
+      <div class="uinfo-row"><span class="uinfo-label">الاسم:</span><b>${target.nickname||'زائر'}</b></div>
+      <div class="uinfo-row"><span class="uinfo-label">الرتبة:</span><span style="color:#4a4a6a">🔓 زائر</span></div>
+      ${isAdmin()?`<div class="uinfo-row"><span class="uinfo-label">IP:</span><span dir="ltr">${target.ip||'-'}</span></div>
+      <div class="uinfo-row"><span class="uinfo-label">الدولة:</span>${target.country||'-'}</div>
+      <div class="uinfo-row"><span class="uinfo-label">الجهاز:</span><span dir="ltr" style="font-size:10px">${(target.fingerprint||'-').slice(0,24)}...</span></div>`:''}
+    `;
+    $('userInfoModal').style.display='flex';bringToFront($('userInfoModal'));return;
+  }
+  try{
+    const u=await api('/users/'+(target.username||'unknown'));
+    $('userInfoBody').innerHTML=`
+      <div style="text-align:center;font-size:44px;margin-bottom:10px">${u.avatar||'🌙'}</div>
+      <div class="uinfo-row"><span class="uinfo-label">الاسم:</span><b>${u.nickname}</b></div>
+      <div class="uinfo-row"><span class="uinfo-label">الرتبة:</span><span style="color:${ROLE_COLORS[u.role]||'#000'};font-weight:700">${ROLE_LBL[u.role]||u.role}</span></div>
+      ${isAdmin()?`<div class="uinfo-row"><span class="uinfo-label">IP:</span><span dir="ltr">${u.last_ip||target.ip||'-'}</span></div>
+      <div class="uinfo-row"><span class="uinfo-label">الدولة:</span>${u.country||target.country||'-'}</div>
+      <div class="uinfo-row"><span class="uinfo-label">الجهاز:</span><span dir="ltr" style="font-size:10px">${(u.fingerprint||target.fingerprint||'-').slice(0,24)}...</span></div>`:''}
+      <div class="uinfo-row"><span class="uinfo-label">آخر ظهور:</span>${u.last_seen?new Date(u.last_seen).toLocaleString('ar'):'-'}</div>
+      <div class="uinfo-row"><span class="uinfo-label">نبذة:</span>${u.bio||'-'}</div>
+    `;
+    $('userInfoModal').style.display='flex';bringToFront($('userInfoModal'));
+  }catch(e){toast('خطأ في تحميل المعلومات','error');}
+}
 function openDragToRoomDialog(target){const roomName=prompt('اسم الغرفة:\n'+state.rooms.map(r=>r.name).join('\n'));const room=state.rooms.find(r=>r.name===roomName);if(room)state.socket?.emit('drag_user_to_room',{targetSocketId:target.socketId,roomId:room.id});}
 function doWhisper(target){const msg=prompt('همسة إلى '+target.nickname+':');if(msg?.trim())state.socket?.emit('whisper',{toSocketId:target.socketId,toNickname:target.nickname,content:msg.trim()});}
 async function kickUser(target){const r=prompt('سبب الطرد:')||'';state.socket?.emit('kick_user',{targetSocketId:target.socketId,reason:r});}
@@ -477,7 +549,8 @@ async function toggleTalk(){
     $('talkBtn').classList.remove('active');$('muteBtn').classList.remove('active');
     playSound('mic_off');toast('🎤 تم إيقاف الميكروفون','info');
   } else {
-    if(state.roomSettings.freeMic&&!state.roomSettings.requireHand){
+    // fix #2 — owner & admins always get free mic
+    if(isOwner()||isAdmin()||state.roomSettings.freeMic&&!state.roomSettings.requireHand){
       const ok=await Voice.startSpeaking(state.socket,state.currentRoom.id,state.deviceSettings.micId||null,state.roomSettings.maxMicTime||0);
       if(ok){state.micActive=true;$('talkBtn').classList.add('active');playSound('mic_on');}
     } else {
@@ -496,6 +569,7 @@ async function toggleMuteBtn(){
       const muted=!track.enabled;
       $('muteBtn').classList.toggle('active',muted);
       $('muteBtn').style.background=muted?'linear-gradient(to bottom,#cc0000,#990000)':'';
+      $('muteBtn').querySelector('span:first-child').textContent=muted?'🔇':'🔊';
       $('muteBtn').querySelector('span:last-child').textContent=muted?'إلغاء الكتم':'كتم نفسي';
       toast(muted?'🔇 تم كتم الميكروفون':'🔊 رُفع الكتم','info');
       state.socket?.emit('speaking',{isSpeaking:false});
@@ -622,12 +696,21 @@ function openEditRoom(room){state.editingRoom=room;$('roomModalTitle').textConte
 async function saveRoom(){
   const name=$('roomName').value.trim(),desc=$('roomDesc').value.trim(),priv=$('roomPrivate').checked,icon=state.selectedRoomIcon;
   if(!name){$('roomMsg').textContent='الاسم مطلوب';$('roomMsg').className='info-msg error';return;}
+  if(!state.token){$('roomMsg').textContent='يجب تسجيل الدخول أولاً';$('roomMsg').className='info-msg error';return;}
   $('roomMsg').textContent='جاري الحفظ...';
   try{
-    if(state.editingRoom)await api('/rooms/'+state.editingRoom.id,'PATCH',{name,description:desc,icon,is_private:priv});
-    else await api('/rooms','POST',{name,description:desc,icon,is_private:priv});
+    // fix #7 — use correct endpoint and verify auth token exists
+    if(state.editingRoom&&state.editingRoom.id){
+      await api('/rooms/'+state.editingRoom.id,'PATCH',{name,description:desc,icon,is_private:priv});
+    } else {
+      await api('/rooms','POST',{name,description:desc,icon,is_private:priv});
+    }
     $('roomModal').style.display='none';await loadRooms();toast('تم حفظ الغرفة ✓','success');
-  }catch(e){$('roomMsg').textContent=e.message;$('roomMsg').className='info-msg error';}
+  }catch(e){
+    $('roomMsg').textContent=e.message||'فشل الاتصال — تحقق من اتصال الخادم';
+    $('roomMsg').className='info-msg error';
+    console.error('saveRoom error:',e);
+  }
 }
 async function deleteRoom(){if(!confirm('حذف هذه الغرفة؟'))return;try{await api('/rooms/'+state.editingRoom.id,'DELETE');$('roomModal').style.display='none';if(state.currentRoom?.id===state.editingRoom.id){state.currentRoom=null;$('messagesArea').innerHTML='';}await loadRooms();toast('تم حذف الغرفة','success');}catch(e){toast(e.message,'error');}}
 async function openRules(){if(!state.currentRoom){toast('اختر غرفة أولاً','error');return;}try{const r=await api('/rooms/'+state.currentRoom.id);$('rulesDisplay').textContent=r.rules||'';$('rulesEdit').value=r.rules||'';}catch{}$('rulesEdit').style.display='none';$('saveRulesBtn').style.display='none';$('rulesModal').style.display='flex';bringToFront($('rulesModal'));}
@@ -677,7 +760,14 @@ function renderManageLogs(){
 function saveVoiceSettings(){state.roomSettings.freeMic=$('vs-freemic').checked;state.roomSettings.requireHand=$('vs-requirehand').checked;state.roomSettings.maxMicTime=parseInt($('vs-maxtime').value)||0;state.roomSettings.maxSpeakers=parseInt($('vs-maxspeakers').value)||1;if(state.currentRoom)state.socket?.emit('save_voice_settings',{roomId:state.currentRoom.id,settings:{maxSpeakers:state.roomSettings.maxSpeakers,maxMicTime:state.roomSettings.maxMicTime,freeMic:state.roomSettings.freeMic}});toast('تم حفظ إعدادات الصوت ✓','success');}
 function saveWebcamSettings(){state.roomSettings.camAllow=$('wc-allow').checked;state.roomSettings.camRequireApproval=$('wc-requireapproval').checked;state.roomSettings.whoCan=$('wc-whoCan').value;state.roomSettings.maxCams=parseInt($('wc-maxcams').value)||5;toast('تم حفظ إعدادات الكاميرا ✓','success');}
 function saveDesignSettings(){if(!state.currentRoom){toast('اختر غرفة أولاً','error');return;}const design={bgColor:$('d-bgColor')?.value||'',chatBg:$('d-chatBg')?.value||'',panelBg:$('d-panelBg')?.value||'',toolbarBg:$('d-toolbarBg')?.value||'',welcomeMsg:$('d-welcomeMsg')?.value||''};state.socket?.emit('save_room_design',{roomId:state.currentRoom.id,design});toast('تم تطبيق التصميم على الجميع ✓','success');}
-function saveAdvancedSettings(){state.roomSettings.noAvatars=$('adv-noAvatars').checked;state.roomSettings.noURLs=$('adv-noURLs').checked;renderUsers();toast('تم حفظ الإعدادات ✓','success');}
+function saveAdvancedSettings(){
+  state.roomSettings.noAvatars=$('adv-noAvatars').checked;
+  state.roomSettings.noURLs=$('adv-noURLs').checked;
+  // fix #8 — guest PM setting
+  state.roomSettings.guestPmAllowed=$('adv-guestPm').checked;
+  if(state.currentRoom)state.socket?.emit('save_voice_settings',{roomId:state.currentRoom.id,settings:{guestPmAllowed:state.roomSettings.guestPmAllowed}});
+  renderUsers();toast('تم حفظ الإعدادات ✓','success');
+}
 function saveSoundSettings(){state.soundsEnabled=!$('soundDisable').checked;state.socket?.emit('set_sound_prefs',{disabled:!state.soundsEnabled});toast(state.soundsEnabled?'الأصوات مفعّلة 🔊':'الأصوات معطّلة 🔇','info');}
 
 async function doAddAccount(){
