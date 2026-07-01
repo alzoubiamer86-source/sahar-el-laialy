@@ -124,12 +124,22 @@ const Voice = (() => {
   let _externalTimerInterval = null;
   function setMaxTime(socket, maxSeconds) {
     clearInterval(_externalTimerInterval);
-    if (!maxSeconds || maxSeconds <= 0) return;
-    let elapsed = micTimeUsed; // already used time
+    clearInterval(micTimerInterval);
+    micTimerInterval = null;
+    if (!maxSeconds || maxSeconds <= 0) {
+      // 0 = unlimited — cancel timer
+      window.dispatchEvent(new CustomEvent('mic_timer', { detail: { remaining: 0, max: 0 } }));
+      return;
+    }
+    micTimeUsed = 0;
     _externalTimerInterval = setInterval(() => {
-      elapsed++;
-      const remaining = maxSeconds - elapsed;
+      micTimeUsed++;
+      const remaining = maxSeconds - micTimeUsed;
       window.dispatchEvent(new CustomEvent('mic_timer', { detail: { remaining, max: maxSeconds } }));
+      if (socket && socket.connected) {
+        const roomId = window._currentRoomId;
+        if (roomId) socket.emit('mic_timer_tick', { timeLeft: remaining, roomId });
+      }
       if (remaining <= 0) {
         clearInterval(_externalTimerInterval);
         stopSpeaking(socket);
