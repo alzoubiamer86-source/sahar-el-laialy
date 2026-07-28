@@ -334,7 +334,18 @@ function connectSocket(){
   s.on('disconnect',()=>{setConn('disconnected');state.micActive=false;$('talkBtn').classList.remove('active');});
 
   document.removeEventListener('visibilitychange', null);
-  s.on('connect_error',()=>setConn('disconnected'));
+  
+  // ★ FIX: Handle backend rejection (e.g. name taken, name registered)
+  s.on('connect_error', (err) => {
+    // If the server explicitly rejected the connection, show the error and log out
+    if (err && err.message && !err.message.includes('transport') && !err.message.includes('xhr poll error')) {
+      $('loginError').textContent = err.message;
+      doLogout();
+    } else {
+      setConn('disconnected');
+    }
+  });
+  
   s.on('room_locked',({roomId,message})=>{$('roomPassError').textContent='';$('roomPassEntryInput').value='';$('roomPassEntryModal').style.display='flex';$('submitRoomPassBtn').onclick=()=>{const pw=$('roomPassEntryInput').value;if(!pw){$('roomPassError').textContent='أدخل كلمة المرور';return;}$('roomPassEntryModal').style.display='none';joinRoom(state.pendingRoomJoin,state.undercover,pw);};});
   s.on('room_lock_status',({roomId,locked})=>{const room=state.rooms.find(r=>r.id===roomId);if(room)room._locked=locked;if($('roomLockIcon'))$('roomLockIcon').style.display=locked&&state.currentRoom?.id===roomId?'':'none';renderRooms();});
   s.on('room_history',({roomId,messages})=>{if(roomId!==state.currentRoom?.id)return;$('messagesArea').innerHTML='';messages.forEach(m=>renderMsg(m));scrollBot(true);});
