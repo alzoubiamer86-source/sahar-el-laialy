@@ -81,7 +81,7 @@ const isOwner  = () => state.user?.username?.toLowerCase() === OWNER_USERNAME &&
 const isAdmin  = () => ['owner','master','pink_master','super_admin','moderator'].includes(state.user?.role);
 
 const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, pink_master:4, owner:5 };
-const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر ', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
+const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر وردي', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
 const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', pink_master:'#FF1493', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
 const RANK_PERMS_MAX = {
   guest:       [],
@@ -770,6 +770,7 @@ function showRemoteCam(socketId,stream){
   $('camModal').style.display='flex';bringToFront($('camModal'));
 }
 
+// ★ FIX: Unmute option added back
 function showCtx(e,target){
   e.preventDefault();e.stopPropagation();
   const menu=$('ctxMenu'),list=$('ctxList');list.innerHTML='';
@@ -810,7 +811,8 @@ function showCtx(e,target){
     }
     if(hasMutePerm){
       add('🔇','كتم',()=>openMuteDialog(target));
-      if(target.isMuted)add('🔊','رفع الكتم',()=>state.socket?.emit('unmute_user',{targetSocketId:target.socketId}));
+      // ★ FIX: Unmute button is now always visible if user has mute permission
+      add('🔊','رفع الكتم',()=>state.socket?.emit('unmute_user',{targetSocketId:target.socketId}));
       add('📷','إيقاف الكاميرا',()=>state.socket?.emit('force_cam_off_target',{targetSocketId:target.socketId}));
     }
     if(state.user.permissions?.dragToRoom===true||own)add('🚪','نقل إلى غرفة',()=>openDragToRoomDialog(target));
