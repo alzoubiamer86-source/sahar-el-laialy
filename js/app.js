@@ -81,7 +81,7 @@ const isOwner  = () => state.user?.username?.toLowerCase() === OWNER_USERNAME &&
 const isAdmin  = () => ['owner','master','pink_master','super_admin','moderator'].includes(state.user?.role);
 
 const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, pink_master:4, owner:5 };
-const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر ', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
+const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر وردي', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
 const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', pink_master:'#FF1493', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
 const RANK_PERMS_MAX = {
   guest:       [],
@@ -565,7 +565,11 @@ function processEmojis(text){
 
 function renderMsg(msg){
   $('chatWelcome')?.remove();
-  if(msg.type==='system'){renderSys(msg.content);return;}
+  if(msg.type==='system'){
+    // ★ FIX: Pass msg.textColor to renderSys
+    renderSys(msg.content, msg.textColor);
+    return;
+  }
   const role=msg.role||'user';
   const color=msg.textColor||msg.text_color||'#000000';
   const size=msg.fontSize||msg.font_size||14;
@@ -597,7 +601,13 @@ function renderMsg(msg){
   $('messagesArea').appendChild(line);
 }
 function renderJoin(nick,avatar,joined){$('chatWelcome')?.remove();const d=el('div',joined?'msg-join':'msg-leave');d.innerHTML=`<span>${joined?'→':'←'}</span><b>${nick}</b><span>${joined?' دخل الغرفة':' غادر الغرفة'}</span>`;$('messagesArea').appendChild(d);scrollBot();}
-function renderSys(text){$('chatWelcome')?.remove();$('messagesArea').appendChild(el('div','msg-sys',text));}
+// ★ FIX: renderSys accepts color and applies it
+function renderSys(text, color){
+  $('chatWelcome')?.remove();
+  const sysEl = el('div','msg-sys',text);
+  if(color) sysEl.style.color = color;
+  $('messagesArea').appendChild(sysEl);
+}
 function renderWhisper(msg){$('chatWelcome')?.remove();const line=el('div','msg-line msg-whisper');line.append(el('span','msg-ts','['+fmtTime(msg.createdAt)+']'),el('span','msg-nick','🔒 '+msg.from+'→'+msg.to),el('span','msg-colon',':'),el('span','msg-text',msg.content));$('messagesArea').appendChild(line);scrollBot();}
 function scrollBot(force=false){const a=$('messagesArea');const near=a.scrollHeight-a.scrollTop-a.clientHeight<150;if(near||force)a.scrollTop=a.scrollHeight;}
 function fmtTime(iso){if(!iso)return'';return new Date(iso).toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'});}
