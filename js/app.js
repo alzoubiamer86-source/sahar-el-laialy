@@ -641,7 +641,7 @@ function renderStage(){
   state.stageUsers.forEach(u=>{
     const d=el('div',`stage-user${u.speaking?' speaking':''}${u.muted?' muted':''}`);
     const timerStr=u.timeLeft>0?`<span class="stage-timer ${u.timeLeft<=10?'urgent':u.timeLeft<=30?'warn':''}">${Math.floor(u.timeLeft/60)>0?Math.floor(u.timeLeft/60)+'د ':''} ${u.timeLeft%60}ث</span>`:'';
-    d.innerHTML=`<span class="stage-av">${u.avatar||'🌙')}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
+    d.innerHTML=`<span class="stage-av">${u.avatar||'🌙'}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
     if(isAdmin()){
       if(u.userId!==state.user.id && u.role !== 'owner'){
         const kb=el('button','stage-kick-btn','✕');kb.title='سحب الميكروفون';
