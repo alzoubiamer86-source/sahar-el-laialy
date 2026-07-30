@@ -1340,4 +1340,536 @@ async function lockUserMachine(userId,nickname,knownFingerprint){
   }catch(e){toast('فشل قفل الجهاز: '+e.message,'error');}
 }
 async function unlockUserMachine(userId,nickname){
-  if(!await showConfirm('رفع قفل الجهاز عن '+nickname+'؟','🔓 فك القفل')
+  if(!await showConfirm('رفع قفل الجهاز عن '+nickname+'؟','🔓 فك القفل'))return;
+  try{
+    await api('/admin/machine-lock/'+userId,'POST',{lock:false});
+    state.socket?.emit('unlock_user_machine',{targetUserId:userId});
+    toast('تم رفع قفل الجهاز ✓','success');
+    loadAccountsPanel();
+  }catch(e){toast('فشل رفع القفل: '+e.message,'error');}
+}
+
+async function confirmDeleteUser(userId,nickname){if(!await showConfirm('حذف المستخدم '+nickname+'؟','🗑 حذف المستخدم'))return;try{await api('/admin/users/'+userId,'DELETE');toast('تم الحذف ✓','success');loadAccountsPanel();}catch(e){toast(e.message,'error');}}
+async function loadBannedPanel(){try{const bans=await api('/admin/bans');const body=$('bannedBody');body.innerHTML='';bans.forEach(b=>{const tr=document.createElement('tr');const rem=b.expires_at?new Date(b.expires_at).toLocaleString('ar'):'دائم';tr.innerHTML=`<td>${b.users?.nickname||'-'}</td><td dir="ltr" style="font-size:9px">${b.fingerprint||b.ip||'-'}</td><td>-</td><td>${b.reason||'-'}</td><td>${new Date(b.created_at).toLocaleString('ar')}</td><td>${rem}</td><td><button class="rm-btn rm-btn-green" onclick="unbanUser('${b.id}')">رفع</button></td>`;body.appendChild(tr);});}catch(e){console.error(e);}}
+async function unbanUser(banId){try{await api('/admin/ban/'+banId,'DELETE');toast('تم رفع الحظر','success');loadBannedPanel();}catch(e){toast(e.message,'error');}}
+function loadRoomsPanel(){const body=$('roomsBody');body.innerHTML='';state.rooms.forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${r.icon}</td><td><b>${r.name}</b>${r.is_private?' 🔐':''}</td><td>${r.description||'-'}</td><td>${r.is_private?'✓':''}</td><td>${r._locked?'🔒':'لا'}</td><td><button class="rm-btn" onclick="openEditRoom(state.rooms.find(x=>x.id==='${r.id}'))">تعديل</button>${isOwner()?`<button class="rm-btn" onclick="openRoomLockDialog('${r.id}')">🔒</button>`:''}`;body.appendChild(tr);});
+  loadOneOnOnePanel();
+}
+async function loadLoginAttempts(){
+  const body=$('loginAttemptsBody');if(!body)return;
+  try{
+    const rows=await api('/admin/login-attempts');
+    body.innerHTML='';
+    if(!rows.length){body.innerHTML='<tr><td colspan="6" style="color:#888">لا توجد محاولات دخول مسجلة</td></tr>';return;}
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td><b>${r.username}</b></td><td dir="ltr" style="font-size:10px">${r.ip||'-'}</td><td>${r.country||'-'}</td>
+        <td>${r.success?'✅ نجح':'❌ فشل'}</td><td style="font-size:10px">${new Date(r.created_at).toLocaleString('ar')}</td>
+        <td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="deleteLoginAttempt('${r.id}')">🗑</button></td>`;
+      body.appendChild(tr);
+    });
+  }catch(e){console.error(e);}
+}
+async function deleteLoginAttempt(id){
+  try{await api('/admin/login-attempts/'+id,'DELETE');loadLoginAttempts();}
+  catch(e){toast('فشل الحذف: '+e.message,'error');}
+}
+async function loadOneOnOnePanel(){
+  const section=$('oneOnOneSection');if(!section)return;
+  if(!isOwner()){section.style.display='none';return;}
+  section.style.display='';
+  try{
+    const rooms=await api('/rooms/1on1');
+    const body=$('oneOnOneBody');if(!body)return;body.innerHTML='';
+    if(!rooms.length){body.innerHTML='<tr><td colspan="3" style="color:#888">لا توجد محادثات خاصة حالياً</td></tr>';return;}
+    rooms.forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${r.icon||'💌'} ${r.name}</td><td>${new Date(r.created_at).toLocaleString('ar')}</td>
+        <td>
+          <button class="rm-btn" onclick="joinRoom({id:'${r.id}',name:'${r.name.replace(/'/g,"")}',icon:'${r.icon||'💌'}'},true);$('roomManagePanel').style.display='none';">👁 دخول متخفي</button>
+          <button class="rm-btn rm-btn-red" onclick="delete121Room('${r.id}','${r.name.replace(/'/g,"")}')">🗑 حذف</button>
+        </td>`;
+      body.appendChild(tr);
+    });
+  }catch(e){console.error(e);}
+}
+async function delete121Room(roomId,roomName){
+  if(!await showConfirm('حذف المحادثة الخاصة "'+roomName+'" نهائياً؟ لا يمكن التراجع.','🗑 حذف محادثة خاصة'))return;
+  try{await api('/rooms/'+roomId,'DELETE');toast('تم حذف المحادثة الخاصة ✓','success');loadOneOnOnePanel();state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');}
+  catch(e){toast('فشل الحذف: '+e.message,'error');}
+}
+function renderManageLogs(){
+  const lb=$('logsBody');if(lb){lb.innerHTML='';state.roomLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.nickname}</b></td><td dir="ltr" style="font-size:9px">${l.ip||'-'}</td><td>${l.country||'-'}</td><td>${l.joinedAt?new Date(l.joinedAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt?new Date(l.leftAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt&&l.joinedAt?Math.round((new Date(l.leftAt)-new Date(l.joinedAt))/60000)+'د':'متصل'}</td><td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="openBanLogDialog({nickname:'${l.nickname}',ip:'${l.ip||''}',fingerprint:'${l.fp||''}'})">حظر</button></td>`;lb.appendChild(tr);});}
+  const ab=$('adminLogsBody');if(ab){ab.innerHTML='';state.adminLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.by}</b></td><td>${l.action}</td><td>${l.target}</td><td>${l.date}</td>`;ab.appendChild(tr);});}
+}
+function saveVoiceSettings(){
+  state.roomSettings.freeMic=$('vs-freemic')?.checked??true;
+  state.roomSettings.requireHand=$('vs-requirehand')?.checked??false;
+  state.roomSettings.maxMicTime=parseInt($('vs-maxtime')?.value)||0;
+  state.roomSettings.maxSpeakers=parseInt($('vs-maxspeakers')?.value)||1;
+  state.roomSettings.guestMicAllowed=$('vs-guestmic')?.checked===true;
+  const rankTimes={
+    guest:   parseInt($('vst-guest')?.value)||0,
+    user:    parseInt($('vst-user')?.value)||0,
+    moderator:parseInt($('vst-moderator')?.value)||0,
+    super_admin:parseInt($('vst-super_admin')?.value)||0,
+    master:  parseInt($('vst-master')?.value)||0,
+    pink_master: parseInt($('vst-master')?.value)||0, 
+    owner:   0
+  };
+  state.roomSettings.rankTimes=rankTimes;
+  if(state.currentRoom){
+    state.socket?.emit('save_voice_settings',{roomId:state.currentRoom.id,settings:{
+      maxSpeakers:state.roomSettings.maxSpeakers,
+      maxMicTime:state.roomSettings.maxMicTime,
+      freeMic:state.roomSettings.freeMic,
+      requireHand:state.roomSettings.requireHand,
+      guestMicAllowed:state.roomSettings.guestMicAllowed,
+      rankTimes
+    }});
+    state.socket?.emit('save_rank_times',{roomId:state.currentRoom.id,rankTimes});
+  } else {
+    toast('اختر غرفة أولاً لحفظ إعدادات الصوت','error');return;
+  }
+  toast('تم حفظ إعدادات الصوت ✓','success');
+}
+function populateVoiceSettingsForm(){
+  const rs=state.roomSettings;
+  if($('vs-freemic')) $('vs-freemic').checked=rs.freeMic!==false;
+  if($('vs-requirehand')) $('vs-requirehand').checked=rs.requireHand===true;
+  if($('vs-maxtime')) $('vs-maxtime').value=rs.maxMicTime||0;
+  if($('vs-maxspeakers')) $('vs-maxspeakers').value=rs.maxSpeakers||1;
+  if($('vs-guestmic')) $('vs-guestmic').checked=rs.guestMicAllowed===true;
+  const rankTimes=rs.rankTimes||{};
+  ['guest','user','moderator','super_admin','master'].forEach(r=>{
+    if($('vst-'+r)) $('vst-'+r).value=rankTimes[r]||0;
+  });
+}
+function saveWebcamSettings(){
+  const whoCan=document.querySelector('input[name="wc-whoCan"]:checked')?.value||'all';
+  state.roomSettings.whoCan=whoCan;
+  state.roomSettings.camAllow=whoCan!=='disabled';
+  state.roomSettings.camRequireApproval=$('wc-requireapproval').checked;
+  state.roomSettings.maxCams=parseInt($('wc-maxcams').value)||5;
+  if(state.currentRoom){
+    state.socket?.emit('save_voice_settings',{roomId:state.currentRoom.id,settings:{
+      camAllow:state.roomSettings.camAllow,
+      camRequireApproval:state.roomSettings.camRequireApproval,
+      whoCan:state.roomSettings.whoCan,
+      maxCams:state.roomSettings.maxCams
+    }});
+  }
+  toast('تم حفظ إعدادات الكاميرا ✓','success');
+}
+function populateWebcamSettingsForm(){
+  const whoCan=state.roomSettings.whoCan||'all';
+  const radio=document.querySelector(`input[name="wc-whoCan"][value="${whoCan}"]`);
+  if(radio) radio.checked=true;
+  if($('wc-requireapproval')) $('wc-requireapproval').checked=state.roomSettings.camRequireApproval!==false;
+  if($('wc-maxcams')) $('wc-maxcams').value=state.roomSettings.maxCams||5;
+}
+function saveDesignSettings(){if(!state.currentRoom){toast('اختر غرفة أولاً','error');return;}const design={bgColor:$('d-bgColor')?.value||'',chatBg:$('d-chatBg')?.value||'',panelBg:$('d-panelBg')?.value||'',toolbarBg:$('d-toolbarBg')?.value||'',welcomeMsg:$('d-welcomeMsg')?.value||''};state.socket?.emit('save_room_design',{roomId:state.currentRoom.id,design});toast('تم تطبيق التصميم على الجميع ✓','success');}
+function saveAdvancedSettings(){
+  state.roomSettings.noAvatars=$('adv-noAvatars').checked;
+  state.roomSettings.noURLs=$('adv-noURLs').checked;
+  state.roomSettings.guestPmAllowed=$('adv-guestPm').checked;
+  if(state.currentRoom)state.socket?.emit('save_voice_settings',{roomId:state.currentRoom.id,settings:{
+    guestPmAllowed:state.roomSettings.guestPmAllowed,
+    noAvatars:state.roomSettings.noAvatars,
+    noURLs:state.roomSettings.noURLs
+  }});
+  renderUsers();toast('تم حفظ الإعدادات ✓','success');
+}
+function populateAdvancedSettingsForm(){
+  if($('adv-noAvatars')) $('adv-noAvatars').checked=state.roomSettings.noAvatars===true;
+  if($('adv-noURLs')) $('adv-noURLs').checked=state.roomSettings.noURLs===true;
+  if($('adv-guestPm')) $('adv-guestPm').checked=state.roomSettings.guestPmAllowed===true;
+  if($('multiLoginToggle')) $('multiLoginToggle').checked=state.globalSettings?.allowMultiLogin!==false;
+  if($('siteClosedToggle')) $('siteClosedToggle').checked=state.globalSettings?.siteClosed===true;
+  if($('siteClosedMsg') && state.globalSettings?.siteClosedMessage) $('siteClosedMsg').value=state.globalSettings.siteClosedMessage;
+  const allowed=state.globalSettings?.siteClosedAllowedUserIds||[];
+  document.querySelectorAll('#siteCloseAllowedList input[type="checkbox"]').forEach(cb=>{cb.checked=allowed.includes(cb.value);});
+}
+function saveSoundSettings(){state.soundsEnabled=!$('soundDisable').checked;state.socket?.emit('set_sound_prefs',{disabled:!state.soundsEnabled});toast(state.soundsEnabled?'الأصوات مفعّلة 🔊':'الأصوات معطّلة 🔇','info');}
+
+function toggleSiteClosed(){
+  if(!isOwner())return;
+  const closed=$('siteClosedToggle')?.checked||false;
+  const msg=($('siteClosedMsg')?.value||'').trim()||'الموقع مغلق مؤقتاً للصيانة';
+  const allowedUserIds=Array.from(document.querySelectorAll('#siteCloseAllowedList input[type="checkbox"]:checked')).map(cb=>cb.value);
+  state.socket?.emit('set_site_closed',{closed,message:msg,allowedUserIds});
+  toast(closed?'🔒 تم إغلاق الموقع — المستخدمون لن يتمكنوا من الدخول':'🔓 تم فتح الموقع','success');
+}
+async function loadSiteCloseAllowedList(){
+  const list=$('siteCloseAllowedList');if(!list||!isOwner())return;
+  try{
+    const users=await api('/admin/users');
+    const admins=users.filter(u=>['moderator','super_admin','master','pink_master'].includes(u.role));
+    const allowed=state.globalSettings?.siteClosedAllowedUserIds||[];
+    list.innerHTML=admins.length?'':'<span style="color:#888">لا يوجد مشرفون</span>';
+    admins.forEach(u=>{
+      const row=el('label','chk-row');row.style.cssText='display:flex;gap:6px;padding:3px 0';
+      row.innerHTML=`<input type="checkbox" value="${u.id}" ${allowed.includes(u.id)?'checked':''}> <span>${u.nickname} <small style="color:#888">(${ROLE_LBL[u.role]||u.role})</small></span>`;
+      list.appendChild(row);
+    });
+  }catch(e){console.error(e);}
+}
+
+async function doAddAccount(){
+  const u=$('newAccUser').value.trim().toLowerCase(),p=$('newAccPass').value,r=$('newAccRole').value;
+  if(!u||!p){$('addAccountMsg').textContent='البيانات مطلوبة';$('addAccountMsg').className='info-msg error';return;}
+  const perms={};PERMS_LIST.forEach(pr=>{perms[pr.key]=$('nacp_'+pr.key)?.checked===true;});
+  $('addAccountMsg').textContent='جاري الإنشاء...';
+  try{
+    await api('/auth/register','POST',{username:u,nickname:u,password:p,avatar:'🌙',fingerprint:''});
+    const users=await api('/admin/users');const newUser=users.find(x=>x.username===u);
+    if(newUser){
+      if(r!=='user')await api('/admin/role/'+newUser.id,'PATCH',{role:r});
+      if(roleLevel(r)>=2) await api('/admin/permissions/'+newUser.id,'PATCH',{permissions:perms});
+    }
+    $('addAccountModal').style.display='none';$('addAccountMsg').textContent='';toast('تم إنشاء الحساب ✓','success');loadAccountsPanel();
+  }catch(e){$('addAccountMsg').textContent=e.message;$('addAccountMsg').className='info-msg error';}
+}
+
+function openSpyPanel(){if(!isOwner()){toast('لوحة التجسس للمالك فقط','error');return;}$('spyPanel').style.display='flex';bringToFront($('spyPanel'));state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');state.socket?.emit('spy_pms');state.socket?.emit('basil_get_logs');state.socket?.emit('owner_get_logs');state.socket?.emit('basil_get_online_all');state.socket?.emit('owner_get_online_all');}
+function renderSpyRooms(){
+  const list=$('spyRoomList');if(!list)return;list.innerHTML='';
+  state.spyRooms.forEach(r=>{
+    const li=el('li','spy-room-item');
+    li.style.display='flex';li.style.alignItems='center';li.style.justifyContent='space-between';li.style.gap='6px';
+    const label=el('span','',r.icon+' '+r.name+(r.is_1on1?' 💌':''));
+    label.style.cursor='pointer';label.style.flex='1';
+    label.addEventListener('click',()=>{
+      document.querySelectorAll('.spy-room-item').forEach(i=>i.classList.remove('active'));
+      li.classList.add('active');
+      if($('spyCurrentRoom'))$('spyCurrentRoom').textContent=r.name;
+      state.socket?.emit('spy_room',{roomId:r.id});
+    });
+    const joinBtn=el('button','rm-btn','👁 دخول');
+    joinBtn.style.cssText='font-size:9px;padding:2px 6px;flex-shrink:0';
+    joinBtn.title='دخول الغرفة متخفياً';
+    joinBtn.addEventListener('click',e=>{
+      e.stopPropagation();
+      joinRoom({id:r.id,name:r.name,icon:r.icon||'💬'},true);
+      $('spyPanel').style.display='none';
+      toast('👁 دخلت "'+r.name+'" متخفياً','info');
+    });
+    li.appendChild(label);li.appendChild(joinBtn);
+    if(r.is_1on1){
+      const delBtn=el('button','rm-btn rm-btn-red','🗑');
+      delBtn.style.cssText='font-size:9px;padding:2px 6px;flex-shrink:0';
+      delBtn.title='حذف هذه المحادثة الخاصة نهائياً';
+      delBtn.addEventListener('click',e=>{
+        e.stopPropagation();
+        delete121Room(r.id,r.name).then(()=>{state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');});
+      });
+      li.appendChild(delBtn);
+    }
+    list.appendChild(li);
+  });
+}
+function renderSpyHistory(roomId){const msgs=state.spyMessages[roomId]||[];const area=$('spyMessages');if(!area)return;area.innerHTML='';if(!msgs.length){area.innerHTML='<div style="color:#668866;padding:10px">لا توجد رسائل</div>';return;}msgs.forEach(m=>{const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(m.created_at||m.createdAt)}]</span> <b style="color:#cc88ff">${m.nickname||m.username||'?'}:</b> <span style="color:#ccaaee">${m.type==='image'?'[صورة]':(m.content||'')}</span>`;area.appendChild(d);});area.scrollTop=area.scrollHeight;}
+function renderSpyPms(){const list=$('spyPmList');if(!list)return;list.innerHTML='';if(!state.spyPms.length){list.innerHTML='<div style="color:#668866;padding:10px">لا توجد رسائل خاصة</div>';return;}state.spyPms.forEach(m=>{const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(m.created_at)}]</span> <b style="color:#ff88cc">${m.from_username}→${m.to_username}:</b> <span style="color:#ccaaee">${m.content}</span>`;list.appendChild(d);});}
+function appendSpyLog(text,time){const area=$('spyLiveLog');if(!area)return;const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(time)}]</span> <span style="color:#88ffaa">${text}</span>`;area.appendChild(d);area.scrollTop=area.scrollHeight;}
+function renderSpyLogs(){const lb=$('spyLogsBody');if(!lb)return;lb.innerHTML='';state.roomLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.nickname}</b></td><td dir="ltr" style="font-size:9px">${l.ip||'-'}</td><td>${l.country||'-'}</td><td>${l.joinedAt?new Date(l.joinedAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt?new Date(l.leftAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt&&l.joinedAt?Math.round((new Date(l.leftAt)-new Date(l.joinedAt))/60000)+'د':'متصل'}</td><td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="openBanLogDialog({nickname:'${l.nickname}',ip:'${l.ip||''}',fingerprint:'${l.fp||''}'})">حظر</button></td>`;lb.appendChild(tr);});const ab=$('spyAdminLogsBody');if(!ab)return;ab.innerHTML='';state.adminLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.by}</b></td><td>${l.action}</td><td>${l.target}</td><td>${l.date}</td>`;ab.appendChild(tr);});}
+function renderAllOnline(users){[$('allOnlineBody'),$('allOnlineBodySpy')].forEach(body=>{if(!body)return;body.innerHTML='';users.forEach(u=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${u.avatar||'🌙'} <b style="color:${ROLE_COLORS[u.role]||'#000'}">${u.nickname}</b></td><td style="color:${ROLE_COLORS[u.role]||'#000'}">${ROLE_LBL[u.role]||u.role}</td><td>${u.roomId?state.rooms.find(r=>r.id===u.roomId)?.name||'-':'-'}</td><td dir="ltr" style="font-size:9px">${u.ip||'-'}</td><td>${u.country||'-'}</td><td dir="ltr" style="font-size:9px">${(u.fingerprint||'').slice(0,14)}...</td><td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="openBanLogDialog({nickname:'${u.nickname}',ip:'${u.ip||''}',fingerprint:'${u.fingerprint||''}'})">حظر</button></td>`;body.appendChild(tr);});});}
+function openRoomLockDialog(roomId){state._lockingRoomId=roomId;$('roomPassInput').value='';$('roomPassModal').style.display='flex';bringToFront($('roomPassModal'));}
+
+function toggleUndercover(){if(!isOwner())return;state.undercover=!state.undercover;const btn=$('undercoverBtn');if(btn){btn.textContent='👁 التخفي: '+(state.undercover?'مفعّل':'معطّل');btn.style.background=state.undercover?'linear-gradient(to bottom,#800080,#600060)':'';}let ind=document.querySelector('.undercover-bar');if(state.undercover){if(!ind){ind=el('div','undercover-bar','👁 وضع التخفي مفعّل');document.body.appendChild(ind);}}else{ind?.remove();}toast(state.undercover?'👁 وضع التخفي مفعّل':'👁 وضع التخفي معطّل','info');if(state.currentRoom&&state.socket){state.socket.disconnect();setTimeout(()=>{state.socket=null;connectSocket();setTimeout(()=>joinRoom(state.currentRoom,state.undercover,''),1500);},500);}}
+function initSpyNav(){document.querySelectorAll('.spy-nav-item').forEach(item=>{item.addEventListener('click',()=>{document.querySelectorAll('.spy-nav-item').forEach(i=>i.classList.remove('active'));document.querySelectorAll('.spy-panel').forEach(p=>p.classList.remove('active'));item.classList.add('active');const p=$('spp-'+item.dataset.sp);if(p)p.classList.add('active');if(item.dataset.sp==='online'){state.socket?.emit('basil_get_online_all');state.socket?.emit('owner_get_online_all');}if(item.dataset.sp==='pms')state.socket?.emit('spy_pms');if(item.dataset.sp==='logs'){state.socket?.emit('basil_get_logs');state.socket?.emit('owner_get_logs');}if(item.dataset.sp==='rooms'){state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');}});});}
+
+let _micTimerInterval = null;
+let _micTimerBar = null;
+
+function _updateTimerUI(remaining){
+  const btn=$('talkBtn');
+  if(!btn)return;
+  const m=Math.floor(remaining/60),s=remaining%60;
+  const label=(m>0?m+'د ':'')+String(s).padStart(2,'0')+'ث';
+  btn.querySelector('span:last-child').textContent=label;
+  if(remaining<=10){
+    btn.style.background='linear-gradient(to bottom,#cc0000,#880000)';
+    btn.classList.add('timing-urgent');
+  } else if(remaining<=30){
+    btn.style.background='linear-gradient(to bottom,#cc6600,#994400)';
+    btn.classList.remove('timing-urgent');
+  } else {
+    btn.style.background='linear-gradient(to bottom,#2a7a2a,#1a5a1a)';
+    btn.classList.remove('timing-urgent');
+  }
+  showMicTimerOnStage(remaining);
+}
+
+function showMicTimerOnStage(remaining){
+  let bar=$('micTimerBar');
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id='micTimerBar';
+    bar.className='mic-timer-bar';
+    const section=document.querySelector('.stage-section');
+    const slots=$('stageSlots');
+    if(section&&slots){
+      slots.insertAdjacentElement('afterend',bar);
+    } else if(section){
+      section.appendChild(bar);
+    } else {
+      document.querySelector('.users-panel')?.appendChild(bar);
+    }
+  }
+  const m=Math.floor(remaining/60),s=remaining%60;
+  const pct=state._micMaxTime>0?Math.max(0,Math.round(remaining/state._micMaxTime*100)):100;
+  const cls=remaining<=10?'urgent':remaining<=30?'warn':'';
+  bar.innerHTML=`<div class="mic-timer-fill ${cls}" style="width:${pct}%"></div>`
+    +`<span class="mic-timer-label">⏱ ${(m>0?m+'د ':'')+(s<10?'0':'')+s}ث</span>`;
+  bar.style.display='block';
+  if(remaining<=0){setTimeout(()=>{if(bar)bar.style.display='none';},600);}
+}
+
+function showMicTimer(maxSeconds){
+  clearInterval(_micTimerInterval);
+  state._micMaxTime=maxSeconds;
+  let remaining=maxSeconds;
+  _updateTimerUI(remaining);
+  _micTimerInterval=setInterval(()=>{
+    remaining--;
+    _updateTimerUI(remaining);
+    if(remaining<=0){
+      clearInterval(_micTimerInterval);
+      const btn=$('talkBtn');
+      if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';btn.classList.remove('timing-urgent');}
+      $('micTimerBar')&&($('micTimerBar').style.display='none');
+    }
+  },1000);
+}
+
+window.addEventListener('mic_timer',e=>{
+  const {remaining,max}=e.detail;
+  if(!state._micMaxTime)state._micMaxTime=max;
+  _updateTimerUI(remaining);
+});
+window.addEventListener('mic_time_up',()=>{
+  clearInterval(_micTimerInterval);
+  const btn=$('talkBtn');
+  if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';btn.classList.remove('timing-urgent');}
+  $('micTimerBar')&&($('micTimerBar').style.display='none');
+  state.micActive=false;$('talkBtn').classList.remove('active');
+  toast('⏰ انتهى وقت الميكروفون','info');
+});
+
+window._applyAdminMicTime = function(timeLeft){
+  clearInterval(_micTimerInterval);
+  state._micMaxTime = timeLeft;
+  Voice.setMaxTime(state.socket, timeLeft); 
+  if(timeLeft===0){
+    $('micTimerBar')&&($('micTimerBar').style.display='none');
+    toast('⏱ تم رفع حد الوقت','success');
+  } else {
+    showMicTimer(timeLeft);
+    toast('⏱ تم تعديل وقتك إلى '+timeLeft+' ثانية','info');
+  }
+};
+
+function saveGlobalSettings(){
+  const multiLogin=$('multiLoginToggle')?.checked ?? true;
+  state.socket?.emit('set_global_settings',{allowMultiLogin:multiLogin});
+  toast('تم حفظ الإعدادات العامة ✓','success');
+}
+
+function doLogout(){
+  Voice.cleanup();
+  state.localStream?.getTracks().forEach(t=>t.stop());
+  state.socket?.disconnect();state.socket=null;
+  api('/auth/logout','POST').catch(()=>{});
+  localStorage.removeItem('sahar_token');localStorage.removeItem('sahar_user');
+  state.token=null;state.user=null;state.currentRoom=null;
+  $('pmPanel')&&($('pmPanel').style.display='none');state.pmTarget=null;
+  $('camModal')&&($('camModal').style.display='none');
+  $('ctxMenu')&&($('ctxMenu').style.display='none');
+  $('spyPanel')&&($('spyPanel').style.display='none');
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.style.display='none');
+  document.querySelector('.users-panel')?.classList.remove('open');
+  document.querySelector('.rooms-panel')?.classList.remove('open');
+  $('panelBackdrop')?.classList.remove('show');
+  $('chatScreen').classList.remove('active');$('loginScreen').classList.add('active');
+}
+function toast(msg,type='info'){const t=el('div','toast '+type,msg);$('toastContainer').appendChild(t);setTimeout(()=>t.remove(),3500);}
+
+function showFullScreenMsg(title,msg,color='#880000'){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.85);color:#fff;font-family:Cairo,sans-serif;text-align:center;gap:16px;padding:20px;cursor:pointer';
+  d.innerHTML='<div style="font-size:52px">'+title.split(' ')[0]+'</div>'
+    +'<div style="font-size:22px;font-weight:900;color:'+color+'">'+title+'</div>'
+    +'<div style="font-size:15px;background:rgba(255,255,255,.1);padding:16px 32px;border-radius:8px;max-width:480px;line-height:2">'+msg+'</div>'
+    +'<div style="font-size:12px;opacity:.6">اضغط في أي مكان للمتابعة</div>';
+  d.addEventListener('click',()=>d.remove());
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(),6000);
+}
+
+function showMobileTab(name){
+  document.querySelectorAll('.mtab-btn').forEach(b=>b.classList.toggle('active',b.dataset.mtab===name));
+  document.querySelector('.rooms-panel')?.classList.toggle('mobile-tab-active', name==='rooms');
+  document.querySelector('.chat-panel')?.classList.toggle('mobile-tab-active', name==='chat');
+  document.querySelector('.users-panel')?.classList.toggle('mobile-tab-active', name==='users');
+  document.querySelector('.rooms-panel')?.classList.remove('open');
+  document.querySelector('.users-panel')?.classList.remove('open');
+  $('panelBackdrop')?.classList.remove('show');
+}
+function toggleUsersPanel(){
+  const isActive=document.querySelector('.users-panel')?.classList.contains('mobile-tab-active');
+  showMobileTab(isActive?'chat':'users');
+}
+function toggleRoomsPanel(){
+  const isActive=document.querySelector('.rooms-panel')?.classList.contains('mobile-tab-active');
+  showMobileTab(isActive?'chat':'rooms');
+}
+function closeMobilePanels(){if(window.innerWidth<=768){document.querySelector('.users-panel')?.classList.remove('open');document.querySelector('.rooms-panel')?.classList.remove('open');$('panelBackdrop')?.classList.remove('show');}}
+
+function bindChat(){
+  $('sendBtn').addEventListener('click',sendMsg);
+  $('msgInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
+  $('msgInput').addEventListener('input',()=>{autoResize($('msgInput'));startTyping();});
+  $('emojiBtn').addEventListener('click',e=>{e.stopPropagation();const p=$('emojiPicker');p.style.display=p.style.display==='none'?'flex':'none';if(p.style.display==='flex')bringToFront(p);});
+  document.addEventListener('click',()=>{$('emojiPicker').style.display='none';$('colorPanel').style.display='none';const fm=$('fmtMorePanel');if(fm)fm.style.display='none';const sw=$('statusPickerWrap');if(sw)sw.style.display='none';});
+  $('colorBtn').addEventListener('click',e=>{e.stopPropagation();const p=$('colorPanel');p.style.display=p.style.display==='none'?'block':'none';if(p.style.display==='block')bringToFront(p);});
+  $('applyCustomColor').addEventListener('click',()=>{applyColor($('customColorInput').value);$('colorPanel').style.display='none';});
+  document.querySelectorAll('.fsize').forEach(btn=>btn.addEventListener('click',()=>{state.fontSize=parseInt(btn.dataset.size);$('msgInput').style.fontSize=state.fontSize+'px';document.querySelectorAll('.fsize').forEach(b=>b.classList.toggle('active',b.dataset.size===btn.dataset.size));}));
+  const toggleBold=()=>{state.bold=!state.bold;document.querySelectorAll('#boldBtn,#boldBtn2').forEach(b=>b?.classList.toggle('active',state.bold));$('msgInput').style.fontWeight=state.bold?'700':'400';};
+  const toggleItalic=()=>{state.italic=!state.italic;document.querySelectorAll('#italicBtn,#italicBtn2').forEach(b=>b?.classList.toggle('active',state.italic));$('msgInput').style.fontStyle=state.italic?'italic':'normal';};
+  $('boldBtn').addEventListener('click',toggleBold);
+  $('boldBtn2')?.addEventListener('click',toggleBold);
+  $('italicBtn').addEventListener('click',toggleItalic);
+  $('italicBtn2')?.addEventListener('click',toggleItalic);
+  $('imageBtn')?.addEventListener('click',()=>$('imageInput').click());
+  $('imageInput')?.addEventListener('change',e=>{if(e.target.files[0])sendImage(e.target.files[0]);e.target.value='';});
+  $('talkBtn').addEventListener('click',toggleTalk);
+  $('muteBtn').addEventListener('click',toggleMuteBtn);
+  $('camBtn').addEventListener('click',toggleCam);
+  $('camSettingsBtn').addEventListener('click',openDeviceSettings);
+  $('handBtn').addEventListener('click',()=>{if(state.handRaised){state.socket?.emit('lower_hand');state.handRaised=false;$('handBtn').classList.remove('active');toast('✋ تم إنزال يدك','info');}else{state.socket?.emit('raise_hand');state.handRaised=true;$('handBtn').classList.add('active');toast('✋ تم رفع يدك','info');}});
+  $('clearChatBtn')?.addEventListener('click',async ()=>{if(await showConfirm('مسح جميع رسائل الغرفة؟','🗑 مسح الدردشة'))state.socket?.emit('clear_chat',{roomId:state.currentRoom?.id});});
+  $('addRoomBtn')?.addEventListener('click',openAddRoom);
+  $('roomManageBtn')?.addEventListener('click',openRoomManage);
+  $('rulesBtn').addEventListener('click',openRules);
+  $('leaveRoomBtn').addEventListener('click',()=>{
+    Voice.cleanupAudio();
+    if(state.micActive){Voice.stopSpeaking(state.socket);state.micActive=false;$('talkBtn').classList.remove('active');}
+    state.currentRoom=null;$('messagesArea').innerHTML='';$('menuRoomName').textContent='سهر الليالي';$('roomTabName').textContent='اختر غرفة';document.querySelectorAll('.room-item').forEach(i=>i.classList.remove('active'));
+    state.socket?.emit('leave_room_explicit');
+  });
+  $('profileItem').addEventListener('click',openProfile);
+  $('logoutItem').addEventListener('click',doLogout);
+  $('notifBell').addEventListener('click',()=>{state.notifications=0;$('notifCount').style.display='none';});
+  $('myStatusIcon')?.addEventListener('click',e=>{e.stopPropagation();const w=$('statusPickerWrap');w.style.display=w.style.display==='none'||!w.style.display?'flex':'none';if(w.style.display==='flex')bringToFront(w);});
+  $('pmRejectAllBtn')?.addEventListener('click',()=>{state.rejectAllPm=!state.rejectAllPm;state.socket?.emit('set_reject_all_pm',{reject:state.rejectAllPm});toast(state.rejectAllPm?'تم رفض كل الرسائل الخاصة':'تم السماح بالرسائل الخاصة','info');$('pmRejectAllBtn').textContent=state.rejectAllPm?'✓ رفض الكل':'رفض الرسائل الخاصة';});
+  $('pmEmojiBtn')?.addEventListener('click',e=>{e.stopPropagation();const p=$('pmEmojiPicker');p.style.display=p.style.display==='none'?'flex':'none';if(p.style.display==='flex')bringToFront(p);});
+  $('closeProfile').addEventListener('click',()=>$('profileModal').style.display='none');
+  $('saveProfileBtn').addEventListener('click',saveProfile);
+  $('changePassBtn').addEventListener('click',changePass);
+  $('profColorInput').addEventListener('input',e=>$('profColorPreview').textContent=e.target.value);
+  $('closeRules').addEventListener('click',()=>$('rulesModal').style.display='none');
+  $('editRulesBtn')?.addEventListener('click',()=>{$('rulesEdit').style.display='';$('saveRulesBtn').style.display='';$('editRulesBtn').style.display='none';});
+  $('saveRulesBtn').addEventListener('click',saveRules);
+  $('closeRoomModal').addEventListener('click',()=>$('roomModal').style.display='none');
+  $('saveRoomBtn').addEventListener('click',saveRoom);
+  $('deleteRoomBtn').addEventListener('click',deleteRoom);
+  $('closeUserInfo').addEventListener('click',()=>$('userInfoModal').style.display='none');
+  $('closePm').addEventListener('click',()=>{$('pmPanel').style.display='none';state.pmTarget=null;});
+  $('pmSendBtn').addEventListener('click',sendPm);
+  $('pmInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendPm();}});
+  $('closeCamModal').addEventListener('click',()=>$('camModal').style.display='none');
+  $('cancelReply').addEventListener('click',cancelReply);
+  $('closeRoomManage').addEventListener('click',()=>$('roomManagePanel').style.display='none');
+  document.querySelectorAll('.rm-nav-item').forEach(item=>item.addEventListener('click',()=>switchRmPanel(item.dataset.panel)));
+  $('accountSearch')?.addEventListener('input',loadAccountsPanel);
+  $('saveVoiceBtn')?.addEventListener('click',saveVoiceSettings);
+  $('saveWebcamBtn')?.addEventListener('click',saveWebcamSettings);
+  $('saveDesignBtn')?.addEventListener('click',saveDesignSettings);
+  $('saveAdvancedBtn')?.addEventListener('click',saveAdvancedSettings);
+  $('saveSoundBtn')?.addEventListener('click',saveSoundSettings);
+  $('clearAllBansBtn')?.addEventListener('click',async ()=>{if(await showConfirm('مسح جميع الحظر والكتم؟','🗑 مسح الحظر')){state.socket?.emit('clear_all_bans');setTimeout(loadBannedPanel,400);}});
+  $('multiLoginToggle')?.addEventListener('change',e=>state.socket?.emit('set_global_settings',{allowMultiLogin:e.target.checked}));
+  $('saveGlobalBtn')?.addEventListener('click',saveGlobalSettings);
+  $('siteCloseBtn')?.addEventListener('click',toggleSiteClosed);
+  $('debugGeoBtn')?.addEventListener('click',async ()=>{
+    const btn=$('debugGeoBtn'),out=$('debugGeoResult');
+    btn.disabled=true;btn.textContent='جاري الاختبار...';
+    out.style.display='block';out.textContent='...';
+    try{
+      const r=await api('/admin/debug-geo');
+      let txt='IP المُختبَر: '+r.ip+'\n'+'='.repeat(40)+'\n\n';
+      r.results.forEach(svc=>{
+        txt+='📡 '+svc.service+'\n';
+        if(svc.error){txt+='  ❌ خطأ شبكة: '+svc.error+'\n';}
+        else{
+          txt+='  HTTP Status: '+svc.httpStatus+'\n';
+          txt+='  الدولة المستخرجة: '+(svc.country||'(لا شيء)')+'\n';
+          if(svc.parseError)txt+='  ⚠️ '+svc.parseError+'\n';
+          txt+='  الرد الخام: '+svc.rawBody+'\n';
+        }
+        txt+='\n';
+      });
+      out.textContent=txt;
+    }catch(e){out.textContent='فشل الاختبار: '+e.message;}
+    finally{btn.disabled=false;btn.textContent='اختبار خدمة تحديد الدولة الآن';}
+  });
+  $('addRoomManageBtn')?.addEventListener('click',()=>{$('roomManagePanel').style.display='none';openAddRoom();});
+  $('addAccountBtn')?.addEventListener('click',()=>{$('addAccountModal').style.display='flex';bringToFront($('addAccountModal'));});
+  $('closeAddAccount')?.addEventListener('click',()=>$('addAccountModal').style.display='none');
+  $('cancelAddAccount')?.addEventListener('click',()=>$('addAccountModal').style.display='none');
+  $('doAddAccount')?.addEventListener('click',doAddAccount);
+  $('closeMuteModal')?.addEventListener('click',()=>$('muteModal').style.display='none');
+  $('doMuteBtn')?.addEventListener('click',doMute);
+  $('cancelMuteBtn')?.addEventListener('click',()=>$('muteModal').style.display='none');
+  $('closeBanModal')?.addEventListener('click', () => $('banModal').style.display = 'none');
+  $('cancelBanBtn')?.addEventListener('click', () => $('banModal').style.display = 'none');
+  $('doBanBtn')?.addEventListener('click', doBan);
+  
+  $('closePermModal')?.addEventListener('click',()=>$('permModal').style.display='none');
+  $('closePermModal2')?.addEventListener('click',()=>$('permModal').style.display='none');
+  $('savePermBtn')?.addEventListener('click',savePermissions);
+  $('closeDeviceModal')?.addEventListener('click',()=>{if(micTestStream){micTestStream.getTracks().forEach(t=>t.stop());micTestStream=null;cancelAnimationFrame(micTestAnim);}$('deviceModal').style.display='none';});
+  $('testMicBtn')?.addEventListener('click',testMic);
+  $('saveDeviceBtn')?.addEventListener('click',saveDeviceSettings);
+  $('closeRoomPassEntry')?.addEventListener('click',()=>$('roomPassEntryModal').style.display='none');
+  $('roomPassEntryInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')$('submitRoomPassBtn')?.click();});
+  $('closeRoomPass')?.addEventListener('click',()=>$('roomPassModal').style.display='none');
+  $('saveRoomPassBtn')?.addEventListener('click',()=>{const pw=$('roomPassInput').value;const roomId=state._lockingRoomId||state.currentRoom?.id;if(roomId){state.socket?.emit('set_room_password',{roomId,password:pw});$('roomPassModal').style.display='none';toast(pw?'تم قفل الغرفة 🔒':'تم رفع القفل','success');}});
+  $('lockRoomBtn')?.addEventListener('click',()=>{if(state.currentRoom)openRoomLockDialog(state.currentRoom.id);});
+  $('closeSpyPanel')?.addEventListener('click',()=>$('spyPanel').style.display='none');
+  $('undercoverBtn')?.addEventListener('click',toggleUndercover);
+  $('clearLogsBtn')?.addEventListener('click',async ()=>{if(await showConfirm('مسح جميع السجلات؟','🗑 مسح السجلات'))state.socket?.emit('clear_logs');});
+  $('clearLoginAttemptsBtn')?.addEventListener('click',async ()=>{
+    if(!await showConfirm('مسح جميع سجلات محاولات الدخول نهائياً؟','🗑 مسح محاولات الدخول'))return;
+    try{await api('/admin/login-attempts','DELETE');toast('تم المسح ✓','success');loadLoginAttempts();}
+    catch(e){toast('فشل المسح: '+e.message,'error');}
+  });
+  const backdrop=$('panelBackdrop');
+  if(backdrop)backdrop.addEventListener('click',()=>{document.querySelector('.users-panel')?.classList.remove('open');document.querySelector('.rooms-panel')?.classList.remove('open');backdrop.classList.remove('show');});
+  document.querySelectorAll('.mtab-btn').forEach(b=>b.addEventListener('click',()=>showMobileTab(b.dataset.mtab)));
+  $('tbMoreBtn')?.addEventListener('click',()=>{
+    const grid=$('tbMoreGrid');grid.innerHTML='';
+    document.querySelectorAll('.toolbar .tb-secondary').forEach(orig=>{
+      if(orig.classList.contains('admin-only') && orig.style.display==='none')return;
+      const clone=orig.cloneNode(true);clone.removeAttribute('id');clone.style.display='flex';
+      clone.addEventListener('click',()=>{orig.click();$('tbMoreOverlay').style.display='none';});
+      grid.appendChild(clone);
+    });
+    $('tbMoreOverlay').style.display='flex';
+  });
+  $('tbMoreOverlay')?.addEventListener('click',e=>{if(e.target.id==='tbMoreOverlay')e.currentTarget.style.display='none';});
+  $('fmtMoreBtn')?.addEventListener('click',e=>{e.stopPropagation();const p=$('fmtMorePanel');p.style.display=p.style.display==='none'?'block':'none';if(p.style.display==='block')bringToFront(p);});
+  initSpyNav();
+  document.addEventListener('keydown',e=>{if(e.key==='F2'&&isAdmin())openRoomManage();});
+}
+
+function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,80)+'px';}
+async function api(path,method='GET',body=null){
+  const opts={method,headers:{'Content-Type':'application/json'}};
+  if(state.token)opts.headers['Authorization']='Bearer '+state.token;
+  if(body)opts.body=JSON.stringify(body);
+  const res=await fetch(CONFIG.API_URL+'/api'+path,opts);
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.error||'خطأ في الاتصال');
+  return data;
+}
