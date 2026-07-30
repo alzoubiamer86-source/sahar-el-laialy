@@ -515,7 +515,17 @@
     <div class="modal-body">
       <div class="mfield"><label>اسم المستخدم</label><input id="newAccUser" placeholder="اسم المستخدم (انجليزي)"></div>
       <div class="mfield"><label>كلمة المرور</label><input id="newAccPass" type="password" placeholder="كلمة المرور"></div>
-      <div class="mfield"><label>الرتبة</label><select id="newAccRole" class="rm-select"></select></div>
+      <div class="mfield">
+        <label>الرتبة</label>
+        <!-- ★ NEW: Added pink_master option directly in HTML -->
+        <select id="newAccRole" class="rm-select">
+          <option value="user">User</option>
+          <option value="moderator">Moderator</option>
+          <option value="super_admin">Super Admin</option>
+          <option value="master">Master</option>
+          <option value="pink_master">Pink Master</option>
+        </select>
+      </div>
       <div style="font-size:11px;font-weight:700;color:var(--accent);margin-top:5px">الصلاحيات:</div>
       <div id="newAccPermsNote" style="display:none;font-size:11px;color:#888;background:#f8f8f8;border:1px solid #ddd;border-radius:4px;padding:6px 8px;margin-bottom:5px">⚪ الصلاحيات لا تُمنح إلا لرتبة مشرف فما فوق</div>
       <div id="newAccPermsGrid" style="display:flex;flex-direction:column;gap:5px;max-height:180px;overflow-y:auto;background:#f8faff;border:1px solid var(--border);border-radius:4px;padding:10px"></div>
