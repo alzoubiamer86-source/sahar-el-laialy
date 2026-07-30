@@ -78,14 +78,10 @@ const state = {
 
 const OWNER_USERNAME = 'owner';
 const isOwner  = () => state.user?.username?.toLowerCase() === OWNER_USERNAME && state.user?.role === 'owner';
-// ★ FIX: Added 'pink_master' to admin list
 const isAdmin  = () => ['owner','master','pink_master','super_admin','moderator'].includes(state.user?.role);
 
-// ★ FIX: Added pink_master level (4)
 const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, pink_master:4, owner:5 };
-// ★ FIX: Added pink_master label
 const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر وردي', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
-// ★ FIX: Added pink_master color
 const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', pink_master:'#FF1493', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
 const RANK_PERMS_MAX = {
   guest:       [],
@@ -93,7 +89,6 @@ const RANK_PERMS_MAX = {
   moderator:   ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','sendImages','dragToRoom'],
   super_admin: ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','invite121'],
   master:      ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','manageSuperAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','machineLock','invite121'],
-  // ★ FIX: Added pink_master permissions (same as master)
   pink_master: ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','manageSuperAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','machineLock','invite121'],
 };
 const RANK_PERMS = RANK_PERMS_MAX; 
@@ -181,7 +176,6 @@ function updateNewAccPermsAvailability(){
 
 function buildRoleDropdown(select,includeOwner=false) {
   if(!select) return; select.innerHTML='';
-  // ★ FIX: Added 'pink_master' to the array
   const roles=['user','moderator','super_admin','master','pink_master'];
   if(includeOwner&&isOwner()) roles.push('owner');
   roles.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=ROLE_LBL[r]||r;o.style.color=ROLE_COLORS[r]||'#000';o.style.fontWeight='700';select.appendChild(o);});
@@ -298,6 +292,10 @@ function joinRoom(room,undercover=false,password=''){
 }
 
 function connectSocket(){
+  if(state.socket){
+    try { state.socket.removeAllListeners(); state.socket.disconnect(); } catch(e){}
+    state.socket = null;
+  }
   setConn('connecting');
   state.socket=io(CONFIG.SOCKET_URL,{
     auth:{token:state.token,fingerprint:state.deviceFp,undercover:state.undercover},
@@ -1179,7 +1177,7 @@ function openPm(target){
 function appendPmMsg(msg,sent){
   if(!msg)return;
   const d=el('div','pm-msg '+(sent?'sent':'recv'));
-  const fromName=sent?'أنت':(msg.from_nickname||msg.from_username||'مجهول');
+  const fromName=sent?'أنا':(msg.from_nickname||msg.from_username||'مجهول');
   const f=el('div','pm-msg-from',fromName);d.appendChild(f);
   d.appendChild(document.createTextNode(msg.content||''));
   $('pmMsgs').appendChild(d);$('pmMsgs').scrollTop=$('pmMsgs').scrollHeight;
