@@ -620,10 +620,16 @@ function renderUsers(){
     if(onStage && u.userId !== state.user.id) return;
     const li=el('li','user-item');
     const statusInfo=USER_STATUSES.find(s=>s.key===u.userStatus)||USER_STATUSES[0];
-    const adminMuteIcon=u.isAdminMuted?'<span title="مكتوم بواسطة المشرف" style="color:#cc0000">🔇</span>':'';
-    const selfMuteIcon=u.isVoiceMuted&&!u.isAdminMuted?'<span title="صوت مكتوم">🔈</span>':'';
-    const camIcon=u.camActive?'<span>📷</span>':'';
-    li.innerHTML=`<span class="u-av">${state.roomSettings.noAvatars?'👤':(u.avatar||'🌙')}</span><div class="u-info"><div class="u-nick" style="color:${ROLE_COLORS[u.role]||'#000'}">${u.nickname}</div><div class="u-role-lbl">${ROLE_LBL[u.role]||''}</div></div><div class="u-icons">${camIcon}${adminMuteIcon}${selfMuteIcon}</div><span class="u-status-icon" title="${statusInfo.label}">${statusInfo.icon}</span>`;
+    
+    // ★ FIX: Added individual mute signs for Text, Voice, Cam, and PM
+    let muteIcons = '';
+    if(u.muteText) muteIcons += '<span title="مكتوم نصياً" style="color:#cc0000">📝</span>';
+    if(u.muteVoice) muteIcons += '<span title="مكتوم صوتياً" style="color:#cc0000">🔇</span>';
+    if(u.muteCam) muteIcons += '<span title="مكتوم كاميرا" style="color:#cc0000">📷</span>';
+    if(u.mutePm) muteIcons += '<span title="مكتوم خاص" style="color:#cc0000">✉️</span>';
+    const camIcon=u.camActive?'<span title="كاميرا مفتوحة">🎥</span>':'';
+    
+    li.innerHTML=`<span class="u-av">${state.roomSettings.noAvatars?'👤':(u.avatar||'🌙')}</span><div class="u-info"><div class="u-nick" style="color:${ROLE_COLORS[u.role]||'#000'}">${u.nickname}</div><div class="u-role-lbl">${ROLE_LBL[u.role]||''}</div></div><div class="u-icons">${camIcon}${muteIcons}</div><span class="u-status-icon" title="${statusInfo.label}">${statusInfo.icon}</span>`;
     if(u.userId!==state.user.id)li.addEventListener('click',e=>{document.querySelectorAll('.user-item').forEach(i=>i.classList.remove('selected'));li.classList.add('selected');showCtx(e,u);});
     list.appendChild(li);
   });
@@ -635,7 +641,7 @@ function renderStage(){
   state.stageUsers.forEach(u=>{
     const d=el('div',`stage-user${u.speaking?' speaking':''}${u.muted?' muted':''}`);
     const timerStr=u.timeLeft>0?`<span class="stage-timer ${u.timeLeft<=10?'urgent':u.timeLeft<=30?'warn':''}">${Math.floor(u.timeLeft/60)>0?Math.floor(u.timeLeft/60)+'د ':''} ${u.timeLeft%60}ث</span>`:'';
-    d.innerHTML=`<span class="stage-av">${u.avatar||'🌙'}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
+    d.innerHTML=`<span class="stage-av">${u.avatar||'🌙')}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
     if(isAdmin()){
       if(u.userId!==state.user.id && u.role !== 'owner'){
         const kb=el('button','stage-kick-btn','✕');kb.title='سحب الميكروفون';
