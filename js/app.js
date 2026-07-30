@@ -81,7 +81,7 @@ const isOwner  = () => state.user?.username?.toLowerCase() === OWNER_USERNAME &&
 const isAdmin  = () => ['owner','master','pink_master','super_admin','moderator'].includes(state.user?.role);
 
 const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, pink_master:4, owner:5 };
-const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر وردي', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
+const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر ', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
 const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', pink_master:'#FF1493', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
 const RANK_PERMS_MAX = {
   guest:       [],
@@ -1652,16 +1652,16 @@ window.addEventListener('mic_time_up',()=>{
   toast('⏰ انتهى وقت الميكروفون','info');
 });
 
+// ★ FIX: Properly handle unlimited time (0) to disable Voice.js internal timer
 window._applyAdminMicTime = function(timeLeft){
   clearInterval(_micTimerInterval);
+  state._micMaxTime = timeLeft;
+  Voice.setMaxTime(state.socket, timeLeft); // Tell Voice.js to update its timer!
   if(timeLeft===0){
-    const btn=$('talkBtn');
-    if(btn){btn.querySelector('span:last-child').textContent='ميكروفون';btn.style.background='';}
     $('micTimerBar')&&($('micTimerBar').style.display='none');
     toast('⏱ تم رفع حد الوقت','success');
   } else {
     showMicTimer(timeLeft);
-    Voice.setMaxTime(state.socket,timeLeft);
     toast('⏱ تم تعديل وقتك إلى '+timeLeft+' ثانية','info');
   }
 };
