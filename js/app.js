@@ -766,7 +766,6 @@ function showCtx(e,target){
   const myLevel=ROLE_LEVELS[state.user.role]||0;const targetLevel=ROLE_LEVELS[target.role]||0;
   const adm=isAdmin();
   const own=isOwner();
-  // ★ FIX: Changed > to >= so admins can act on users of the same rank
   const canAct=myLevel>=targetLevel&&!target.isOwner;
   const hasMutePerm=own||(state.user.permissions?.muteUsers===true&&targetLevel<=myLevel&&!target.isOwner);
   const hasKickPerm=own||(state.user.permissions?.kickout===true&&targetLevel<=myLevel&&!target.isOwner);
@@ -925,7 +924,6 @@ function openPermDialog(target){
 
   const myLevel   = ROLE_LEVELS[state.user.role]||0;
   const targetLvl = ROLE_LEVELS[target.role]||0;
-  // ★ FIX: Changed > to >= so admins can edit permissions of users with the same rank
   const canEdit   = isOwner()||(myLevel>=targetLvl);
   const maxPerms  = RANK_PERMS_MAX[target.role]||PERMS_LIST.map(p=>p.key);
 
@@ -1532,44 +1530,119 @@ async function doAddAccount(){
 }
 
 function openSpyPanel(){if(!isOwner()){toast('لوحة التجسس للمالك فقط','error');return;}$('spyPanel').style.display='flex';bringToFront($('spyPanel'));state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');state.socket?.emit('spy_pms');state.socket?.emit('basil_get_logs');state.socket?.emit('owner_get_logs');state.socket?.emit('basil_get_online_all');state.socket?.emit('owner_get_online_all');}
+
+// ★ FIX: Completely revamped to render room boxes
 function renderSpyRooms(){
-  const list=$('spyRoomList');if(!list)return;list.innerHTML='';
+  const container=$('spyRoomList');if(!container)return;container.innerHTML='';
+  if(!state.spyRooms.length){container.innerHTML='<div style="color:#668866;padding:10px">لا توجد غرف</div>';return;}
+  
+  container.style.display='flex';
+  container.style.flexWrap='wrap';
+  container.style.gap='8px';
+  container.style.listStyle='none';
+  container.style.padding='0';
+  
   state.spyRooms.forEach(r=>{
-    const li=el('li','spy-room-item');
-    li.style.display='flex';li.style.alignItems='center';li.style.justifyContent='space-between';li.style.gap='6px';
-    const label=el('span','',r.icon+' '+r.name+(r.is_1on1?' 💌':''));
-    label.style.cursor='pointer';label.style.flex='1';
-    label.addEventListener('click',()=>{
-      document.querySelectorAll('.spy-room-item').forEach(i=>i.classList.remove('active'));
-      li.classList.add('active');
+    const box=el('li','spy-room-box');
+    box.style.cssText='flex:1 1 30%;min-width:120px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px;cursor:pointer;text-align:center;transition:0.2s;position:relative;';
+    box.innerHTML=`<div style="font-size:20px;margin-bottom:5px;">${r.icon}</div><div style="font-size:12px;color:#fff;font-weight:700;">${r.name}</div>${r.is_private?'<span style="color:#f59e0b;font-size:10px;">🔐 خاصة</span>':''}`;
+    
+    box.addEventListener('mouseenter',()=>box.style.background='rgba(255,255,255,0.1)');
+    box.addEventListener('mouseleave',()=>box.style.background='rgba(255,255,255,0.05)');
+    
+    box.addEventListener('click',()=>{
       if($('spyCurrentRoom'))$('spyCurrentRoom').textContent=r.name;
       state.socket?.emit('spy_room',{roomId:r.id});
     });
-    const joinBtn=el('button','rm-btn','👁 دخول');
-    joinBtn.style.cssText='font-size:9px;padding:2px 6px;flex-shrink:0';
-    joinBtn.title='دخول الغرفة متخفياً';
-    joinBtn.addEventListener('click',e=>{
+    
+    const joinBtn=el('button','rm-btn','👁');
+    joinBtn.style.cssText='position:absolute;top:2px;left:2px;font-size:9px;padding:2px 4px;background:rgba(0,0,0,0.5);';
+    joinBtn.title='دخول متخفي';
+    joinBtn.addEventListener('click',(e)=>{
       e.stopPropagation();
       joinRoom({id:r.id,name:r.name,icon:r.icon||'💬'},true);
       $('spyPanel').style.display='none';
       toast('👁 دخلت "'+r.name+'" متخفياً','info');
     });
-    li.appendChild(label);li.appendChild(joinBtn);
-    if(r.is_1on1){
-      const delBtn=el('button','rm-btn rm-btn-red','🗑');
-      delBtn.style.cssText='font-size:9px;padding:2px 6px;flex-shrink:0';
-      delBtn.title='حذف هذه المحادثة الخاصة نهائياً';
-      delBtn.addEventListener('click',e=>{
-        e.stopPropagation();
-        delete121Room(r.id,r.name).then(()=>{state.socket?.emit('basil_get_all_rooms');state.socket?.emit('owner_get_all_rooms');});
-      });
-      li.appendChild(delBtn);
-    }
-    list.appendChild(li);
+    box.appendChild(joinBtn);
+    
+    container.appendChild(box);
   });
 }
-function renderSpyHistory(roomId){const msgs=state.spyMessages[roomId]||[];const area=$('spyMessages');if(!area)return;area.innerHTML='';if(!msgs.length){area.innerHTML='<div style="color:#668866;padding:10px">لا توجد رسائل</div>';return;}msgs.forEach(m=>{const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(m.created_at||m.createdAt)}]</span> <b style="color:#cc88ff">${m.nickname||m.username||'?'}:</b> <span style="color:#ccaaee">${m.type==='image'?'[صورة]':(m.content||'')}</span>`;area.appendChild(d);});area.scrollTop=area.scrollHeight;}
-function renderSpyPms(){const list=$('spyPmList');if(!list)return;list.innerHTML='';if(!state.spyPms.length){list.innerHTML='<div style="color:#668866;padding:10px">لا توجد رسائل خاصة</div>';return;}state.spyPms.forEach(m=>{const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(m.created_at)}]</span> <b style="color:#ff88cc">${m.from_username}→${m.to_username}:</b> <span style="color:#ccaaee">${m.content}</span>`;list.appendChild(d);});}
+function renderSpyHistory(roomId){
+  const msgs=state.spyMessages[roomId]||[];
+  const area=$('spyMessages');
+  if(!area)return;
+  area.innerHTML='';
+  if(!msgs.length){area.innerHTML='<div style="color:#668866;padding:10px">لا توجد رسائل</div>';return;}
+  msgs.forEach(m=>{
+    const d=el('div','spy-msg-line');
+    d.innerHTML=`<span class="spy-ts">[${fmtTime(m.created_at||m.createdAt)}]</span> <b style="color:#cc88ff">${m.nickname||m.username||'?'}:</b> <span style="color:#ccaaee">${m.type==='image'?'[صورة]':(m.content||'')}</span>`;
+    area.appendChild(d);
+  });
+  area.scrollTop=area.scrollHeight;
+}
+
+// ★ FIX: Completely revamped to group PMs into conversation boxes and add Clear All
+function renderSpyPms(){
+  const list=$('spyPmList');if(!list)return;list.innerHTML='';
+  
+  const clearBtn=el('button','rm-btn rm-btn-red','🗑 مسح القائمة');
+  clearBtn.style.cssText='margin-bottom:10px;width:100%;font-size:11px;padding:5px;';
+  clearBtn.addEventListener('click',()=>{
+    state.spyPms=[];
+    renderSpyPms();
+    toast('تم مسح قائمة الرسائل الخاصة من العرض','info');
+  });
+  list.appendChild(clearBtn);
+
+  if(!state.spyPms.length){
+    list.appendChild(el('div','spy-empty','لا توجد رسائل خاصة'));
+    return;
+  }
+  
+  const convos={};
+  state.spyPms.forEach(m=>{
+    const from=m.from_username||m.from_nickname||'مجهول';
+    const to=m.to_username||'مجهول';
+    const key=[from,to].sort().join(' ↔ ');
+    if(!convos[key])convos[key]={users:key,msgs:[]};
+    convos[key].msgs.push(m);
+  });
+  
+  Object.values(convos).forEach(c=>{
+    const lastMsg=c.msgs[c.msgs.length-1];
+    const box=el('div','spy-convo-box');
+    box.style.cssText='background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;';
+    box.innerHTML=`
+      <div style="color:#ff88cc;font-weight:700;font-size:13px;margin-bottom:4px;">💬 ${c.users}</div>
+      <div style="color:#aaa;font-size:11px;">${lastMsg.from_username}: ${lastMsg.content.slice(0,50)}</div>
+    `;
+    box.addEventListener('click',()=>showSpyConvo(c));
+    list.appendChild(box);
+  });
+}
+
+function showSpyConvo(convo){
+  const list=$('spyPmList');if(!list)return;list.innerHTML='';
+  
+  const backBtn=el('button','rm-btn','‹ رجوع');
+  backBtn.style.cssText='margin-bottom:10px;font-size:11px;padding:5px 10px;';
+  backBtn.addEventListener('click',renderSpyPms);
+  list.appendChild(backBtn);
+  
+  const header=el('div','',`💬 ${convo.users}`);
+  header.style.cssText='color:#ff88cc;font-weight:700;font-size:14px;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:10px;';
+  list.appendChild(header);
+  
+  convo.msgs.forEach(m=>{
+    const d=el('div','spy-msg-line');
+    d.style.cssText='padding:8px;border-radius:6px;margin-bottom:4px;background:rgba(0,0,0,0.2);';
+    d.innerHTML=`<span style="color:#888;font-size:10px;">[${fmtTime(m.created_at)}]</span> <b style="color:#cc88ff">${m.from_username}</b> <span style="color:#eee;">${m.content}</span>`;
+    list.appendChild(d);
+  });
+}
+
 function appendSpyLog(text,time){const area=$('spyLiveLog');if(!area)return;const d=el('div','spy-msg-line');d.innerHTML=`<span class="spy-ts">[${fmtTime(time)}]</span> <span style="color:#88ffaa">${text}</span>`;area.appendChild(d);area.scrollTop=area.scrollHeight;}
 function renderSpyLogs(){const lb=$('spyLogsBody');if(!lb)return;lb.innerHTML='';state.roomLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.nickname}</b></td><td dir="ltr" style="font-size:9px">${l.ip||'-'}</td><td>${l.country||'-'}</td><td>${l.joinedAt?new Date(l.joinedAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt?new Date(l.leftAt).toLocaleString('ar'):'-'}</td><td>${l.leftAt&&l.joinedAt?Math.round((new Date(l.leftAt)-new Date(l.joinedAt))/60000)+'د':'متصل'}</td><td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="openBanLogDialog({nickname:'${l.nickname}',ip:'${l.ip||''}',fingerprint:'${l.fp||''}'})">حظر</button></td>`;lb.appendChild(tr);});const ab=$('spyAdminLogsBody');if(!ab)return;ab.innerHTML='';state.adminLogs.slice(0,100).forEach(l=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${l.by}</b></td><td>${l.action}</td><td>${l.target}</td><td>${l.date}</td>`;ab.appendChild(tr);});}
 function renderAllOnline(users){[$('allOnlineBody'),$('allOnlineBodySpy')].forEach(body=>{if(!body)return;body.innerHTML='';users.forEach(u=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${u.avatar||'🌙'} <b style="color:${ROLE_COLORS[u.role]||'#000'}">${u.nickname}</b></td><td style="color:${ROLE_COLORS[u.role]||'#000'}">${ROLE_LBL[u.role]||u.role}</td><td>${u.roomId?state.rooms.find(r=>r.id===u.roomId)?.name||'-':'-'}</td><td dir="ltr" style="font-size:9px">${u.ip||'-'}</td><td>${u.country||'-'}</td><td dir="ltr" style="font-size:9px">${(u.fingerprint||'').slice(0,14)}...</td><td><button class="rm-btn rm-btn-red" style="font-size:9px;padding:2px 6px" onclick="openBanLogDialog({nickname:'${u.nickname}',ip:'${u.ip||''}',fingerprint:'${u.fingerprint||''}'})">حظر</button></td>`;body.appendChild(tr);});});}
