@@ -627,14 +627,17 @@ function renderStage(){
     const timerStr=u.timeLeft>0?`<span class="stage-timer ${u.timeLeft<=10?'urgent':u.timeLeft<=30?'warn':''}">${Math.floor(u.timeLeft/60)>0?Math.floor(u.timeLeft/60)+'د ':''} ${u.timeLeft%60}ث</span>`:'';
     d.innerHTML=`<span class="stage-av">${u.avatar||'🌙'}</span><span class="stage-nick">${u.nickname}</span>${u.muted?'<span>🔇</span>':'<span>🎤</span>'}${timerStr}`;
     if(isAdmin()){
-      if(u.userId!==state.user.id){
+      // ★ FIX: Allow mic controls for anyone except the owner
+      if(u.userId!==state.user.id && u.role !== 'owner'){
         const kb=el('button','stage-kick-btn','✕');kb.title='سحب الميكروفون';
         kb.addEventListener('click',()=>state.socket?.emit('revoke_mic',{toSocketId:u.socketId}));
         d.appendChild(kb);
       }
-      const tb=el('button','stage-time-btn','⏱');tb.title='تعديل الوقت';
-      tb.addEventListener('click',e=>{e.stopPropagation();openMicTimeDialog(u);});
-      d.appendChild(tb);
+      if(u.role !== 'owner') {
+        const tb=el('button','stage-time-btn','⏱');tb.title='تعديل الوقت';
+        tb.addEventListener('click',e=>{e.stopPropagation();openMicTimeDialog(u);});
+        d.appendChild(tb);
+      }
     }
     slots.appendChild(d);
   });
@@ -1652,11 +1655,10 @@ window.addEventListener('mic_time_up',()=>{
   toast('⏰ انتهى وقت الميكروفون','info');
 });
 
-// ★ FIX: Properly handle unlimited time (0) to disable Voice.js internal timer
 window._applyAdminMicTime = function(timeLeft){
   clearInterval(_micTimerInterval);
   state._micMaxTime = timeLeft;
-  Voice.setMaxTime(state.socket, timeLeft); // Tell Voice.js to update its timer!
+  Voice.setMaxTime(state.socket, timeLeft); 
   if(timeLeft===0){
     $('micTimerBar')&&($('micTimerBar').style.display='none');
     toast('⏱ تم رفع حد الوقت','success');
