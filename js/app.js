@@ -78,21 +78,21 @@ const state = {
 
 const OWNER_USERNAME = 'owner';
 const isOwner  = () => state.user?.username?.toLowerCase() === OWNER_USERNAME && state.user?.role === 'owner';
-const isAdmin  = () => ['owner','master','pink_master','super_admin','moderator'].includes(state.user?.role);
+const isAdmin  = () => ['owner','master','super_admin','moderator'].includes(state.user?.role);
 
-const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, pink_master:4, owner:5 };
-const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', pink_master:'🌸 ماستر وردي', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
-const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', pink_master:'#FF1493', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
+const ROLE_LEVELS = { guest:0, user:1, moderator:2, super_admin:3, master:4, owner:5 };
+const ROLE_LBL    = { owner:'👑 مالك', master:'🌟 ماستر', super_admin:'⚡ سوبر أدمن', moderator:'🛡️ مشرف', user:'👤 عضو', guest:'🔓 زائر' };
+const ROLE_COLORS = { owner:'#8b0000', master:'#8b4513', super_admin:'#6a0dad', moderator:'#00008b', user:'#1a5a1a', guest:'#4a4a6a' };
 const RANK_PERMS_MAX = {
   guest:       [],
   user:        [],
   moderator:   ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','sendImages','dragToRoom'],
   super_admin: ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','invite121'],
   master:      ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','manageSuperAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','machineLock','invite121'],
-  pink_master: ['blockMachine','muteUsers','kickout','banUsers','sortMicList','clearText','broadcast','unban','viewLog','manageAccounts','manageMembers','manageAdmins','manageSuperAdmins','sendImages','dragToRoom','roomSettings','adminReports','profilePic','machineLock','invite121'],
 };
 const RANK_PERMS = RANK_PERMS_MAX; 
 
+// ★ FIX: Updated Avatar List
 const AVATARS    = ['🌙','⭐','🌟','💫','🌸','🌺','🦋','🐉','🦁','🐺','🦊','🐻','🦅','🌊'];
 const ROOM_ICONS = ['💬','🌙','⭐','🎵','🎮','📚','🌹','🏆','🎭','🌊','🔥','💎','🕌','🎨','🌿','🤝','🎤','📷','🌺','🏄','☕','🍵','🏠','🌃','🎪','🧩','🌐','🔮'];
 const USER_STATUSES = [
@@ -176,7 +176,7 @@ function updateNewAccPermsAvailability(){
 
 function buildRoleDropdown(select,includeOwner=false) {
   if(!select) return; select.innerHTML='';
-  const roles=['user','moderator','super_admin','master','pink_master'];
+  const roles=['user','moderator','super_admin','master'];
   if(includeOwner&&isOwner()) roles.push('owner');
   roles.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=ROLE_LBL[r]||r;o.style.color=ROLE_COLORS[r]||'#000';o.style.fontWeight='700';select.appendChild(o);});
 }
@@ -292,10 +292,6 @@ function joinRoom(room,undercover=false,password=''){
 }
 
 function connectSocket(){
-  if(state.socket){
-    try { state.socket.removeAllListeners(); state.socket.disconnect(); } catch(e){}
-    state.socket = null;
-  }
   setConn('connecting');
   state.socket=io(CONFIG.SOCKET_URL,{
     auth:{token:state.token,fingerprint:state.deviceFp,undercover:state.undercover},
@@ -339,7 +335,9 @@ function connectSocket(){
 
   document.removeEventListener('visibilitychange', null);
   
+  // ★ FIX: Handle backend rejection (e.g. name taken, name registered)
   s.on('connect_error', (err) => {
+    // If the server explicitly rejected the connection, show the error and log out
     if (err && err.message && !err.message.includes('transport') && !err.message.includes('xhr poll error')) {
       $('loginError').textContent = err.message;
       doLogout();
@@ -500,7 +498,7 @@ function connectSocket(){
     });
     $('notifContainer').appendChild(popup);
   });
-  s.on('pm121_declined',({by})=>toast(by+' رفض دعوة المحادثة الخاصة','info');});
+  s.on('pm121_declined',({by})=>{toast(by+' رفض دعوة المحادثة الخاصة','info');});
   s.on('force_join_121',({room})=>{
     toast('💌 دخلت محادثة خاصة 1:1','success');
     joinRoom({id:room.id,name:room.name,icon:room.icon||'💌'});
@@ -806,6 +804,7 @@ function showCtx(e,target){
     if(hasKickPerm){
       add('🥾','طرد',()=>kickUser(target),'ctx-danger');
     }
+    // ★ FIX: Unified Ban Button
     if(hasBanPerm){
       add('🚫','حظر',()=>banUser(target),'ctx-danger');
     }
@@ -857,25 +856,28 @@ async function kickUser(target){
   state.socket?.emit('kick_user',{targetSocketId:target.socketId,reason:r});
 }
 
+// ★ FIX: Unified Ban User function
 async function banUser(target){
   state.banTarget = target;
   $('banUserAvatar').textContent = target.avatar || '👤';
   $('banUserName').textContent = target.nickname;
-  $('banDuration').value = '0'; 
+  $('banDuration').value = '0'; // Default to permanent
   $('banReason').value = '';
   $('banModal').style.display = 'flex';
   bringToFront($('banModal'));
 }
 
+// ★ FIX: Unified doBan function to handle modal submission
 async function doBan(){
   if(!state.banTarget) return;
   const target = state.banTarget;
   const r = $('banReason').value.trim();
   const d = $('banDuration').value;
-  const duration = d === '0' ? 0 : parseInt(d); 
+  const duration = d === '0' ? 0 : parseInt(d); // duration in hours, 0 = permanent
   
-  $('banModal').style.display = 'none'; 
+  $('banModal').style.display = 'none'; // Close modal immediately
   
+  // Use ban_from_log for ALL bans to ensure IP + Fingerprint + User ID are all saved
   state.socket?.emit('ban_from_log', {
     nickname: target.nickname,
     ip: target.ip || '',
@@ -1177,7 +1179,7 @@ function openPm(target){
 function appendPmMsg(msg,sent){
   if(!msg)return;
   const d=el('div','pm-msg '+(sent?'sent':'recv'));
-  const fromName=sent?'أنا':(msg.from_nickname||msg.from_username||'مجهول');
+  const fromName=sent?'أنت':(msg.from_nickname||msg.from_username||'مجهول');
   const f=el('div','pm-msg-from',fromName);d.appendChild(f);
   d.appendChild(document.createTextNode(msg.content||''));
   $('pmMsgs').appendChild(d);$('pmMsgs').scrollTop=$('pmMsgs').scrollHeight;
@@ -1282,7 +1284,7 @@ async function loadAccountsPanel(){
     const body=$('accountsBody');body.innerHTML='';
     let members=0,mods=0,admins=0,masters=0;
     filtered.forEach(u=>{
-      if(u.role==='master'||u.role==='pink_master')masters++;else if(u.role==='super_admin')admins++;else if(u.role==='moderator')mods++;else members++;
+      if(u.role==='master')masters++;else if(u.role==='super_admin')admins++;else if(u.role==='moderator')mods++;else members++;
       const tr=document.createElement('tr');
       const permJson=JSON.stringify(u.permissions||{}).replace(/'/g,"\'").replace(/"/g,'&quot;');
       const isLocked=!!u.locked_fingerprint;
@@ -1410,7 +1412,6 @@ function saveVoiceSettings(){
     moderator:parseInt($('vst-moderator')?.value)||0,
     super_admin:parseInt($('vst-super_admin')?.value)||0,
     master:  parseInt($('vst-master')?.value)||0,
-    pink_master: parseInt($('vst-master')?.value)||0, 
     owner:   0
   };
   state.roomSettings.rankTimes=rankTimes;
@@ -1500,7 +1501,7 @@ async function loadSiteCloseAllowedList(){
   const list=$('siteCloseAllowedList');if(!list||!isOwner())return;
   try{
     const users=await api('/admin/users');
-    const admins=users.filter(u=>['moderator','super_admin','master','pink_master'].includes(u.role));
+    const admins=users.filter(u=>['moderator','super_admin','master'].includes(u.role));
     const allowed=state.globalSettings?.siteClosedAllowedUserIds||[];
     list.innerHTML=admins.length?'':'<span style="color:#888">لا يوجد مشرفون</span>';
     admins.forEach(u=>{
@@ -1818,6 +1819,7 @@ function bindChat(){
   $('closeMuteModal')?.addEventListener('click',()=>$('muteModal').style.display='none');
   $('doMuteBtn')?.addEventListener('click',doMute);
   $('cancelMuteBtn')?.addEventListener('click',()=>$('muteModal').style.display='none');
+  // ★ FIX: Ban Modal listeners
   $('closeBanModal')?.addEventListener('click', () => $('banModal').style.display = 'none');
   $('cancelBanBtn')?.addEventListener('click', () => $('banModal').style.display = 'none');
   $('doBanBtn')?.addEventListener('click', doBan);
