@@ -663,7 +663,7 @@ async function openMicTimeDialog(stageUser){
   const rankTimes=state.roomSettings.rankTimes||{};
   const rankDefault=rankTimes[stageUser.role]||0;
   const hint=rankDefault>0?`\nالافتراضي لرتبته: ${rankDefault}ث`:'';
-  const secs=await showPrompt(`تعديل وقت ${stageUser.nickname}${current}${hint}\n\nأدخل الثواني المتبقية (0 = بلا حد):`,'','⏱ تعديل وقت الميكروفون');
+  const secs=await showPrompt(`تعديل ${stageUser.nickname}${current}${hint}\n\nأدخل الثواني المتبقية (0 = بلا حد):`,'','⏱ تعديل الميكروفون');
   if(secs===null)return; 
   const val=Math.max(0,parseInt(secs)||0);
   state.socket?.emit('update_mic_time',{targetSocketId:stageUser.socketId,timeLeft:val});
@@ -1038,12 +1038,18 @@ async function toggleTalk(){
     $('talkBtn').classList.remove('active');$('muteBtn').classList.remove('active');
     playSound('mic_off');toast('🎤 تم إيقاف الميكروفون','info');
   } else {
-    if(isOwner()||isAdmin()||state.roomSettings.freeMic&&!state.roomSettings.requireHand){
+    // ★ FIX: Check if stage is full before starting mic/timer
+    const isStageFull = state.stageUsers.length >= (state.roomSettings.maxSpeakers || 1);
+    
+    if(isOwner()||isAdmin()||(state.roomSettings.freeMic && !state.roomSettings.requireHand && !isStageFull)){
       const rankTimes=state.roomSettings.rankTimes||{};
       const myMaxTime=rankTimes[state.user.role]||state.roomSettings.maxMicTime||0;
       const ok=await Voice.startSpeaking(state.socket,state.currentRoom.id,state.deviceSettings.micId||null,myMaxTime);
-      if(ok){state.micActive=true;$('talkBtn').classList.add('active');playSound('mic_on');if(myMaxTime>0)showMicTimer(myMaxTime);}
+      // ★ FIX: Only set active, DO NOT start timer here. 
+      // The server will send 'mic_time_limit' to start the timer safely.
+      if(ok){state.micActive=true;$('talkBtn').classList.add('active');playSound('mic_on');}
     } else {
+      // Stage is full, just raise hand. No timer starts!
       if(state.handRaised){state.socket?.emit('lower_hand');state.handRaised=false;$('handBtn').classList.remove('active');toast('✋ تم إنزال يدك','info');}
       else{state.socket?.emit('raise_hand');state.handRaised=true;$('handBtn').classList.add('active');toast('✋ تم رفع يدك','info');}
     }
